@@ -109,11 +109,6 @@ static VkResult wrapper_vulkan_init()
       supported_instance_extensions->extensions[idx] = true;
    }
 
-   /* Block extensions that don't work. */
-   supported_instance_extensions->EXT_debug_utils = false;
-   supported_instance_extensions->EXT_debug_report = false;
-   supported_instance_extensions->KHR_device_group_creation = false;
-
    return VK_SUCCESS;
 }
 
