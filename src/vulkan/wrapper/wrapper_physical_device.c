@@ -78,6 +78,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
    struct wrapper_instance *instance = (struct wrapper_instance *)_instance;
    VkPhysicalDevice physical_devices[16];
    uint32_t physical_device_count = 16;
+   static int wrapper_disable_placed = -1;
    VkResult result;
 
    result = instance->dispatch_table.EnumeratePhysicalDevices(
@@ -120,6 +121,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
                                              get_instance_proc_addr,
                                              instance->dispatch_handle);
 
+	  if (wrapper_disable_placed == -1)
+          wrapper_disable_placed = getenv("WRAPPER_DISABLE_PLACED") ? atoi(getenv("WRAPPER_DISABLE_PLACED")) : 0;
+
       wrapper_setup_device_extensions(pdevice);
       wrapper_apply_device_extension_blacklist(pdevice);
       wrapper_setup_device_features(pdevice);
@@ -130,8 +134,17 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       supported_features->multiViewport = true;
       supported_features->depthClamp = true;
       supported_features->depthBiasClamp = true;
-      supported_features->memoryMapPlaced = true;
-      supported_features->memoryUnmapReserve = true;
+      if (!wrapper_disable_placed) {
+        pdevice->vk.supported_extensions.EXT_map_memory_placed = true;
+        pdevice->vk.supported_extensions.KHR_map_memory2 = true;
+      	supported_features->memoryMapPlaced = true;
+      	supported_features->memoryUnmapReserve = true;
+      } else {
+      	pdevice->vk.supported_extensions.EXT_map_memory_placed = false;
+        pdevice->vk.supported_extensions.KHR_map_memory2 = false;
+      	supported_features->memoryMapPlaced = false;
+      	supported_features->memoryUnmapReserve = false;
+      }
       supported_features->textureCompressionBC = true;
       supported_features->fillModeNonSolid = true;
       supported_features->shaderClipDistance = true;
