@@ -178,6 +178,7 @@ struct wsi_device {
    } win32;
 
    bool sw;
+   bool forcesync;
 
    bool wants_ahardware_buffer;
    bool needs_blit;
