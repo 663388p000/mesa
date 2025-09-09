@@ -91,7 +91,6 @@ struct wsi_x11_connection {
    bool is_proprietary_x11;
    bool is_xwayland;
    bool has_mit_shm;
-   bool has_xfixes;
 };
 
 struct wsi_x11 {
@@ -234,10 +233,10 @@ wsi_x11_connection_create(struct wsi_device *wsi_dev,
 {
    xcb_query_extension_cookie_t dri3_cookie, pres_cookie, randr_cookie,
                                 amd_cookie, nv_cookie, shm_cookie, sync_cookie,
-                                xfixes_cookie, xwl_cookie;
+                                xwl_cookie;
    xcb_query_extension_reply_t *dri3_reply, *pres_reply, *randr_reply,
                                *amd_reply, *nv_reply, *shm_reply = NULL,
-                               *xfixes_reply, *xwl_reply;
+                               *xwl_reply;
    bool wants_shm = wsi_dev->sw && !(WSI_DEBUG & WSI_DEBUG_NOSHM) &&
                     wsi_dev->has_import_memory_host;
    bool has_dri3_v1_2 = false;
@@ -259,7 +258,6 @@ wsi_x11_connection_create(struct wsi_device *wsi_dev,
    dri3_cookie = xcb_query_extension(conn, 4, "DRI3");
    pres_cookie = xcb_query_extension(conn, 7, "Present");
    randr_cookie = xcb_query_extension(conn, 5, "RANDR");
-   xfixes_cookie = xcb_query_extension(conn, 6, "XFIXES");
    xwl_cookie = xcb_query_extension(conn, 8, "XWAYLAND");
 
    if (wants_shm)
@@ -283,14 +281,12 @@ wsi_x11_connection_create(struct wsi_device *wsi_dev,
    randr_reply = xcb_query_extension_reply(conn, randr_cookie, NULL);
    amd_reply = xcb_query_extension_reply(conn, amd_cookie, NULL);
    nv_reply = xcb_query_extension_reply(conn, nv_cookie, NULL);
-   xfixes_reply = xcb_query_extension_reply(conn, xfixes_cookie, NULL);
    xwl_reply = xcb_query_extension_reply(conn, xwl_cookie, NULL);
    if (wants_shm)
       shm_reply = xcb_query_extension_reply(conn, shm_cookie, NULL);
-   if (!dri3_reply || !pres_reply || !xfixes_reply) {
+   if (!dri3_reply || !pres_reply) {
       free(dri3_reply);
       free(pres_reply);
-      free(xfixes_reply);
       free(xwl_reply);
       free(randr_reply);
       free(amd_reply);
@@ -332,17 +328,6 @@ wsi_x11_connection_create(struct wsi_device *wsi_dev,
       free(ver_reply);
    }
 #endif
-
-   wsi_conn->has_xfixes = xfixes_reply->present != 0;
-   if (wsi_conn->has_xfixes) {
-      xcb_xfixes_query_version_cookie_t ver_cookie;
-      xcb_xfixes_query_version_reply_t *ver_reply;
-
-      ver_cookie = xcb_xfixes_query_version(conn, 6, 0);
-      ver_reply = xcb_xfixes_query_version_reply(conn, ver_cookie, NULL);
-      wsi_conn->has_xfixes = (ver_reply->major_version >= 2);
-      free(ver_reply);
-   }
 
    wsi_conn->is_xwayland = wsi_x11_detect_xwayland(conn, randr_reply,
                                                    xwl_reply);
@@ -388,7 +373,6 @@ wsi_x11_connection_create(struct wsi_device *wsi_dev,
    free(xwl_reply);
    free(amd_reply);
    free(nv_reply);
-   free(xfixes_reply);
    if (wants_shm)
       free(shm_reply);
 
@@ -1067,8 +1051,7 @@ struct x11_image {
    struct wsi_image                          base;
    xcb_pixmap_t                              pixmap;
    xcb_xfixes_region_t                       update_region; /* long lived XID */
-   xcb_xfixes_region_t                       update_area;   /* the above or None */
-   struct xshmfence *                        shm_fence;
+   xcb_xfixes_region_t                   update_area;   /* the above or None */
    uint32_t                                  sync_fence;
    xcb_shm_seg_t                             shmseg;
    int                                       shmid;
@@ -1411,12 +1394,12 @@ x11_present_to_x11_dri3(struct x11_swapchain *chain, uint32_t image_index,
    if (chain->has_dri3_modifiers)
       options |= XCB_PRESENT_OPTION_SUBOPTIMAL;
 
-   xshmfence_reset(image->shm_fence);
-
    if (!chain->base.image_info.explicit_sync) {
       ++chain->sent_image_count;
       assert(chain->sent_image_count <= chain->base.image_count);
    }
+
+   xcb_sync_reset_fence(chain->conn, image->sync_fence);
 
    ++chain->send_sbc;
    uint32_t serial = (uint32_t)chain->send_sbc;
@@ -1784,11 +1767,7 @@ x11_acquire_next_image(struct wsi_swapchain *anv_chain,
       return result;
 
    assert(*image_index < chain->base.image_count);
-#ifdef HAVE_X11_DRM
-   if (chain->images[*image_index].shm_fence &&
-       !chain->base.image_info.explicit_sync)
-      xshmfence_await(chain->images[*image_index].shm_fence);
-#endif
+   xcb_sync_await_fence(chain->conn, 1, &chain->images[*image_index].sync_fence);
 
    return result;
 }
@@ -1827,7 +1806,6 @@ x11_queue_present(struct wsi_swapchain *anv_chain,
          rects[i].width = rect->extent.width;
          rects[i].height = rect->extent.height;
       }
-      xcb_xfixes_set_region(chain->conn, update_area, damage->rectangleCount, rects);
       chain->images[image_index].rectangle_count = damage->rectangleCount;
    } else {
       chain->images[image_index].rectangle_count = 0;
@@ -2084,9 +2062,8 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
    xcb_void_cookie_t cookie;
    xcb_generic_error_t *error = NULL;
    uint32_t bpp = 32;
-   int fence_fd;
+   
    image->update_region = xcb_generate_id(chain->conn);
-   xcb_xfixes_create_region(chain->conn, image->update_region, 0, NULL);
 
    if (chain->base.wsi->sw) {
       image->shmseg = xcb_generate_id(chain->conn);
@@ -2110,7 +2087,6 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
 
    if (image->base.drm_modifier != DRM_FORMAT_MOD_INVALID) {
       /* If the image has a modifier, we must have DRI3 v1.2. */
-      assert(chain->has_dri3_modifiers);
 
 #ifdef __TERMUX__
       int sock_fds[2] = { -1, -1 };
@@ -2212,30 +2188,11 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
 #endif
 
 out_fence:
-   fence_fd = xshmfence_alloc_shm();
-   if (fence_fd < 0)
-      goto fail_pixmap;
-
-   image->shm_fence = xshmfence_map_shm(fence_fd);
-   if (image->shm_fence == NULL)
-      goto fail_shmfence_alloc;
-
    image->sync_fence = xcb_generate_id(chain->conn);
-   xcb_dri3_fence_from_fd(chain->conn,
-                          image->pixmap,
-                          image->sync_fence,
-                          false,
-                          fence_fd);
-
-   xshmfence_trigger(image->shm_fence);
+   xcb_sync_create_fence(chain->conn, image->pixmap, image->sync_fence, false);
+   xcb_sync_trigger_fence(chain->conn, image->sync_fence);
+   
    return VK_SUCCESS;
-
-fail_shmfence_alloc:
-   close(fence_fd);
-
-fail_pixmap:
-   cookie = xcb_free_pixmap(chain->conn, image->pixmap);
-   xcb_discard_reply(chain->conn, cookie.sequence);
 
 fail_image:
    wsi_destroy_image(&chain->base, &image->base);
@@ -2256,13 +2213,11 @@ x11_image_finish(struct x11_swapchain *chain,
 #ifdef HAVE_X11_DRM
       cookie = xcb_sync_destroy_fence(chain->conn, image->sync_fence);
       xcb_discard_reply(chain->conn, cookie.sequence);
-      xshmfence_unmap_shm(image->shm_fence);
 #endif
 
       cookie = xcb_free_pixmap(chain->conn, image->pixmap);
       xcb_discard_reply(chain->conn, cookie.sequence);
 #ifdef HAVE_X11_DRM
-      cookie = xcb_xfixes_destroy_region(chain->conn, image->update_region);
       xcb_discard_reply(chain->conn, cookie.sequence);
 #endif
 #ifdef HAVE_DRI3_EXPLICIT_SYNC
@@ -2465,32 +2420,6 @@ x11_swapchain_destroy(struct wsi_swapchain *anv_chain,
    vk_free(pAllocator, chain);
 
    return VK_SUCCESS;
-}
-
-static void
-wsi_x11_set_adaptive_sync_property(xcb_connection_t *conn,
-                                   xcb_drawable_t drawable,
-                                   uint32_t state)
-{
-   static char const name[] = "_VARIABLE_REFRESH";
-   xcb_intern_atom_cookie_t cookie;
-   xcb_intern_atom_reply_t* reply;
-   xcb_void_cookie_t check;
-
-   cookie = xcb_intern_atom(conn, 0, strlen(name), name);
-   reply = xcb_intern_atom_reply(conn, cookie, NULL);
-   if (reply == NULL)
-      return;
-
-   if (state)
-      check = xcb_change_property_checked(conn, XCB_PROP_MODE_REPLACE,
-                                          drawable, reply->atom,
-                                          XCB_ATOM_CARDINAL, 32, 1, &state);
-   else
-      check = xcb_delete_property_checked(conn, drawable, reply->atom);
-
-   xcb_discard_reply(conn, check.sequence);
-   free(reply);
 }
 
 static VkResult x11_wait_for_present(struct wsi_swapchain *wsi_chain,
@@ -2834,12 +2763,6 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
                      x11_manage_event_queue, chain);
    if (ret != thrd_success)
       goto fail_init_event_queue;
-
-   /* It is safe to set it here as only one swapchain can be associated with
-    * the window, and swapchain creation does the association. At this point
-    * we know the creation is going to succeed. */
-   wsi_x11_set_adaptive_sync_property(conn, window,
-                                      wsi_device->enable_adaptive_sync);
 
    *swapchain_out = &chain->base;
 
