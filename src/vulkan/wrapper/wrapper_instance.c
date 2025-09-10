@@ -41,6 +41,8 @@ static PFN_vkGetInstanceProcAddr get_instance_proc_addr;
 static PFN_vkEnumerateInstanceVersion enumerate_instance_version;
 static PFN_vkEnumerateInstanceExtensionProperties enumerate_instance_extension_properties;
 static struct vk_instance_extension_table *supported_instance_extensions;
+char *wrapper_log_level;
+char *wrapper_log_dir;
 
 #ifdef __LP64__
 #define DEFAULT_VULKAN_PATH "/system/lib64/libvulkan.so"
@@ -101,6 +103,20 @@ static VkResult wrapper_vulkan_init()
    VkExtensionProperties props[VK_INSTANCE_EXTENSION_COUNT];
    uint32_t prop_count = VK_INSTANCE_EXTENSION_COUNT;
    VkResult result;
+
+   if (!wrapper_log_level) {
+      wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
+      if (!wrapper_log_level)
+         wrapper_log_level = "none";
+   }
+
+   if (!wrapper_log_dir) {
+      wrapper_log_dir = getenv("WRAPPER_LOG_DIR");
+      if (!wrapper_log_dir)
+         wrapper_log_dir = "/sdcard/wrapper";
+
+      mkdir(wrapper_log_dir, 755);
+   }
 
    if (supported_instance_extensions)
       return VK_SUCCESS;
