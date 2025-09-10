@@ -204,6 +204,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             pdevice->vk.supported_extensions.KHR_pipeline_library = true;
       }
 
+      if (strstr(engine_name, "DXVK") && pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
+         pdevice->vk.supported_extensions.EXT_robustness2 = true;
+      }
+
       pdevice->dma_heap_fd = open("/dev/dma_heap/system", O_RDONLY);
       if (pdevice->dma_heap_fd < 0)
          pdevice->dma_heap_fd = open("/dev/ion", O_RDONLY);
