@@ -250,12 +250,34 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
 }
 
 VKAPI_ATTR void VKAPI_CALL
+wrapper_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
+                                    VkPhysicalDeviceProperties *pProperties)
+{
+   char *device_name;
+   
+   VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
+   pdevice->dispatch_table.GetPhysicalDeviceProperties(
+      pdevice->dispatch_handle, pProperties);
+
+   asprintf(&device_name, "Wrapper(%s)", pProperties->deviceName);
+
+   strcpy(pProperties->deviceName, device_name);
+}
+
+VKAPI_ATTR void VKAPI_CALL
 wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
                                      VkPhysicalDeviceProperties2* pProperties)
 {
+   char *device_name;
+   char *driver_info;
+   
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    pdevice->dispatch_table.GetPhysicalDeviceProperties2(
       pdevice->dispatch_handle, pProperties);
+
+   asprintf(&device_name, "Wrapper(%s)", pProperties->properties.deviceName);
+   
+   strcpy(pProperties->properties.deviceName, device_name);
 
    vk_foreach_struct(prop, pProperties->pNext) {
       switch (prop->sType) {
@@ -310,6 +332,14 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
          vk12_prop->shaderRoundingModeRTEFloat32 = false;
          vk12_prop->shaderSignedZeroInfNanPreserveFloat16 = false;
          vk12_prop->shaderSignedZeroInfNanPreserveFloat32 = false;
+ 
+         asprintf(&driver_info, "%d.%d.%d", 
+            VK_VERSION_MAJOR(pProperties->properties.driverVersion),
+            VK_VERSION_MINOR(pProperties->properties.driverVersion),
+            VK_VERSION_PATCH(pProperties->properties.driverVersion));
+         
+         strcpy(vk12_prop->driverInfo, driver_info);
+         strcpy(vk12_prop->driverName, "Wrapper driver");
          break;
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES:
