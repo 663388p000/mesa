@@ -84,6 +84,32 @@ wrapper_append_required_extensions(const struct vk_device *device,
 #undef REQUIRED_EXTENSION
 }
 
+static void unlink_unsupported_struct(VkDeviceCreateInfo *create_info, struct wrapper_physical_device *pdevice) {
+   const VkBaseInStructure *current = (VkBaseInStructure *)create_info->pNext;
+   VkBaseInStructure *prev = NULL;
+
+   while (current != NULL) {
+      switch(current->sType) {
+          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+             if (pdevice->base_supported_extensions.EXT_robustness2)
+                break;
+             if (!prev) {
+                create_info->pNext = current->pNext;
+                current = current->pNext;
+             }
+             else {
+             	prev->pNext = current->pNext;
+             	current = current->pNext;
+             }
+             continue;
+          default:
+             break;
+      }
+      prev = (VkBaseInStructure *)current;
+      current = current->pNext;
+   }
+}
+
 static VkResult
 wrapper_create_device_queue(struct wrapper_device *device,
                             const VkDeviceCreateInfo* pCreateInfo)
@@ -238,6 +264,8 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
        pdf2->features.shaderCullDistance &=
             physical_device->base_supported_features.shaderCullDistance;
    }
+
+   unlink_unsupported_struct(&wrapper_create_info, device->physical);
    
    result = physical_device->dispatch_table.CreateDevice(
       physical_device->dispatch_handle, &wrapper_create_info,
