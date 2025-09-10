@@ -184,11 +184,24 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       const char *app_name = instance->vk.app_info.app_name
          ? instance->vk.app_info.app_name : "wrapper";
 
+      const char *engine_name = instance->vk.app_info.engine_name
+         ? instance->vk.app_info.engine_name : "wrapper";
+
+      const uint32_t engine_version = instance->vk.app_info.engine_version;
+
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY &&
           pdevice->properties2.properties.driverVersion > VK_MAKE_VERSION(512, 744, 0) &&
           strstr(app_name, "clvk")) {
          /* HACK: Fixed clvk not working on qualcomm proprietary driver. */
          supported_features->globalPriorityQuery = false;
+      }
+
+      /* HACK: make newer dxvk work on Qualcomm proprietary drivers */
+      
+      if (strstr(engine_name, "DXVK") && pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
+         pdevice->vk.supported_extensions.EXT_line_rasterization = false;	
+         if (engine_version >= VK_MAKE_VERSION(2, 7, 0))
+            pdevice->vk.supported_extensions.KHR_pipeline_library = true;
       }
 
       pdevice->dma_heap_fd = open("/dev/dma_heap/system", O_RDONLY);
