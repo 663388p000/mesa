@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 
 #include "wrapper_private.h"
+#include "graphicsenv_hook.hpp"
 #include "wrapper_entrypoints.h"
 #include "vk_alloc.h"
 #include "vk_common_entrypoints.h"
@@ -35,14 +36,22 @@ const struct vk_instance_extension_table wrapper_instance_extensions = {
    .EXT_headless_surface = true,
 };
 
+static const char *layers[] = {
+   "VK_LAYER_KHRONOS_validation"
+};
+
+
 static void *vulkan_library_handle;
 static PFN_vkCreateInstance create_instance;
 static PFN_vkGetInstanceProcAddr get_instance_proc_addr;
 static PFN_vkEnumerateInstanceVersion enumerate_instance_version;
 static PFN_vkEnumerateInstanceExtensionProperties enumerate_instance_extension_properties;
+static PFN_vkEnumerateInstanceLayerProperties enumerate_instance_layer_properties;
 static struct vk_instance_extension_table *supported_instance_extensions;
+
 char *wrapper_log_level;
 char *wrapper_log_dir;
+bool has_intercepted_layer_paths = false;
 
 #ifdef __LP64__
 #define DEFAULT_VULKAN_PATH "/system/lib64/libvulkan.so"
@@ -64,13 +73,17 @@ static void *get_vulkan_handle()
 
    struct stat sb;
 
+   if (strstr(wrapper_log_level, "validation")) {
+      has_intercepted_layer_paths = set_layer_paths();
+   }
+
    if (hooks && path && (stat(path, &sb) == 0)) {
       char *temp;
       asprintf(&temp, "%s%s", path, "temp");
       mkdir(temp, S_IRWXU | S_IRWXG);
       return  adrenotools_open_libvulkan(RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, temp, hooks, path, name, NULL, NULL);
    }
-   else 
+   else
       return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
 }
 
@@ -90,6 +103,8 @@ static bool vulkan_library_init()
                                          "vkEnumerateInstanceVersion");
       enumerate_instance_extension_properties =
          dlsym(vulkan_library_handle, "vkEnumerateInstanceExtensionProperties");
+      enumerate_instance_layer_properties =
+         dlsym(vulkan_library_handle, "vkEnumerateInstanceLayerProperties");
    }
    else {
       fprintf(stderr, "%s", dlerror());
@@ -260,6 +275,28 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    }
    enumerate_instance_version(&wrapper_application_info.apiVersion);
    wrapper_create_info.pApplicationInfo = &wrapper_application_info;
+
+   if (strstr(wrapper_log_level, "validation")) {
+      if (!has_intercepted_layer_paths)
+         return vk_error(NULL, VK_ERROR_LAYER_NOT_PRESENT);
+         
+      uint32_t layer_count = 0;
+      enumerate_instance_layer_properties(&layer_count, NULL);
+
+      if (layer_count == 0)
+      	return vk_error(NULL, VK_ERROR_LAYER_NOT_PRESENT);
+
+      VkLayerProperties layer_props[layer_count];
+      enumerate_instance_layer_properties(&layer_count, layer_props);
+
+      for (int i = 0; i < layer_count; i++) {
+         if (!strcmp(layer_props[i].layerName, layers[0])) {
+            wrapper_create_info.enabledLayerCount = 1;
+            wrapper_create_info.ppEnabledLayerNames = layers;
+         }
+      }
+   }
+
    wrapper_create_info.enabledExtensionCount = wrapper_enable_extension_count;
    wrapper_create_info.ppEnabledExtensionNames = wrapper_enable_extensions;
 
