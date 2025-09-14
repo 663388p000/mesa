@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 
 #include "wrapper_private.h"
+#include "wrapper_log.h"
 #include "graphicsenv_hook.hpp"
 #include "wrapper_entrypoints.h"
 #include "vk_alloc.h"
@@ -49,8 +50,6 @@ static PFN_vkEnumerateInstanceExtensionProperties enumerate_instance_extension_p
 static PFN_vkEnumerateInstanceLayerProperties enumerate_instance_layer_properties;
 static struct vk_instance_extension_table *supported_instance_extensions;
 
-char *wrapper_log_level;
-char *wrapper_log_dir;
 bool has_intercepted_layer_paths = false;
 
 #ifdef __LP64__
@@ -73,7 +72,7 @@ static void *get_vulkan_handle()
 
    struct stat sb;
 
-   if (strstr(wrapper_log_level, "validation")) {
+   if (WRAPPER_LOG_LEVEL(validation)) {
       has_intercepted_layer_paths = set_layer_paths();
    }
 
@@ -118,20 +117,6 @@ static VkResult wrapper_vulkan_init()
    VkExtensionProperties props[VK_INSTANCE_EXTENSION_COUNT];
    uint32_t prop_count = VK_INSTANCE_EXTENSION_COUNT;
    VkResult result;
-
-   if (!wrapper_log_level) {
-      wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
-      if (!wrapper_log_level)
-         wrapper_log_level = "none";
-   }
-
-   if (!wrapper_log_dir) {
-      wrapper_log_dir = getenv("WRAPPER_LOG_DIR");
-      if (!wrapper_log_dir)
-         wrapper_log_dir = "/sdcard/wrapper";
-
-      mkdir(wrapper_log_dir, 755);
-   }
 
    if (supported_instance_extensions)
       return VK_SUCCESS;
@@ -276,7 +261,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    enumerate_instance_version(&wrapper_application_info.apiVersion);
    wrapper_create_info.pApplicationInfo = &wrapper_application_info;
 
-   if (strstr(wrapper_log_level, "validation")) {
+   if (WRAPPER_LOG_LEVEL(validation)) {
       if (!has_intercepted_layer_paths)
          return vk_error(NULL, VK_ERROR_LAYER_NOT_PRESENT);
          

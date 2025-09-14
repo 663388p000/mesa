@@ -12,8 +12,6 @@
 extern const struct vk_instance_extension_table wrapper_instance_extensions;
 extern const struct vk_device_extension_table wrapper_device_extensions;
 extern const struct vk_device_extension_table wrapper_filter_extensions;
-extern char *wrapper_log_level;
-extern char *wrapper_log_dir;
 
 struct wrapper_instance {
    struct vk_instance vk;
@@ -108,3 +106,4 @@ wrapper_device_memory_create(struct wrapper_device *device,
 
 void
 wrapper_device_memory_destroy(struct wrapper_device_memory *mem);
+

@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 
 #include "wrapper_private.h"
+#include "wrapper_log.h"
 #include "wrapper_entrypoints.h"
 #include "wrapper_trampolines.h"
 #include "vk_alloc.h"
@@ -428,21 +429,8 @@ wrapper_CreateShaderModule(VkDevice _device,
    static int index = 0;
    VK_FROM_HANDLE(wrapper_device, device, _device);
    
-   if (strstr(wrapper_log_level, "shader")) {
-      char *shader_dump_dir;
-      char *shader_dump_file;
-
-      asprintf(&shader_dump_dir, "%s/%s", wrapper_log_dir, "shaders");
-      mkdir(shader_dump_dir, 755);
-
-      asprintf(&shader_dump_file, "%s/%s_%d", shader_dump_dir, "shader_dump", index);
-
-      FILE *f = fopen(shader_dump_file, "wb");
-      fwrite(pCreateInfo->pCode, 1, pCreateInfo->codeSize, f);
-      fclose(f);
-      
-      index++;
-   }
+   if (WRAPPER_LOG_LEVEL(shader)) 
+      WRAPPER_LOGS(pCreateInfo->pCode, pCreateInfo->codeSize);
    
    return device->dispatch_table.CreateShaderModule(
       device->dispatch_handle, pCreateInfo, pAllocator, pShaderModule);
