@@ -229,6 +229,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
                              pAllocator ? pAllocator : vk_default_allocator());
 
    if (result != VK_SUCCESS) {
+      WRAPPER_LOGE("WRAPPER: Failed to init instance, res %d\n", result);
       vk_free2(vk_default_allocator(), pAllocator, instance);
       return vk_error(NULL, result);
    }
@@ -268,8 +269,10 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       uint32_t layer_count = 0;
       enumerate_instance_layer_properties(&layer_count, NULL);
 
-      if (layer_count == 0)
+      if (layer_count == 0) {
+        WRAPPER_LOGE("WRAPPER: Failed to find Vulkan Validation layer\n"); 
       	return vk_error(NULL, VK_ERROR_LAYER_NOT_PRESENT);
+      }
 
       VkLayerProperties layer_props[layer_count];
       enumerate_instance_layer_properties(&layer_count, layer_props);
@@ -288,6 +291,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    result = create_instance(&wrapper_create_info, pAllocator,
                             &instance->dispatch_handle);
    if (result != VK_SUCCESS) {
+      WRAPPER_LOGE("WRAPPER: Failed driver createInstance, res %d\n", result);
       vk_instance_finish(&instance->vk);
       vk_free2(vk_default_allocator(), pAllocator, instance);
       return vk_error(NULL, result);

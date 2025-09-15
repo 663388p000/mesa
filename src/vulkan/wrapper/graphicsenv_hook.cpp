@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "graphicsenv_hook.hpp"
+#include "wrapper_log.h"
 
 #define LIBNAME "/system/lib64/libgraphicsenv.so"
 #define WRAPPER_LAYERS_PATH "/data/data/com.winlator.cmod/files/imagefs/usr/lib:/data/data/com.termux/files/usr/lib"
@@ -35,12 +36,14 @@ bool set_layer_paths() {
    get_function_pointer(setLayerPaths, "_ZN7android11GraphicsEnv13setLayerPathsEPNS_21NativeLoaderNamespaceERKNSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEE");
 
    if (!getInstance || !getLayerPaths || !getAppNamespace || !setLayerPaths) {
+      WRAPPER_LOGE("WRAPPER: Failed to get function pointers from libgraphicsenv.so\n");
       return false;    	
    }
 
    void *instance = getInstance();
 
    if (!instance) {
+      WRAPPER_LOGE("WRAPPER: Failed to obtain GraphicsEnv instance\n");
       return false;
    }
 
@@ -59,6 +62,7 @@ bool set_layer_paths() {
    auto path = getLayerPaths(instance);
 
    if (path != env_layers_path) {
+      WRAPPER_LOGE("WRAPPER: Failed to change layer paths\n");
       return false;
    }
 

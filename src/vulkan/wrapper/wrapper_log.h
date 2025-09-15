@@ -5,8 +5,15 @@
 #include <libgen.h>
 #include <stdlib.h>
 
-char *
-get_wrapper_log_level(void);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+char *get_wrapper_log_level(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 char *
 get_executable_name(void);
@@ -18,7 +25,9 @@ dump_shader_code(const uint32_t *code, size_t size);
 
 #define WRAPPER_LOGE(...) \
 do {\
-   if (WRAPPER_LOG_LEVEL(error)) {\
+   if (WRAPPER_LOG_LEVEL(error) || \
+      WRAPPER_LOG_LEVEL(validation) || \
+      WRAPPER_LOG_LEVEL(shader)) {\
       dprintf(STDERR_FILENO, __VA_ARGS__);\
    }\
 } while (0)
