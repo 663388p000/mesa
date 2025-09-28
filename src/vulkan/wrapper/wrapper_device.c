@@ -283,10 +283,17 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
          pAllocator, &device->dispatch_handle);
 
    if (result != VK_SUCCESS) {
-      WRAPPER_LOGE("Failed driver createDevice, res %d\n", result);
-      wrapper_DestroyDevice(wrapper_device_to_handle(device),
+      wrapper_create_info.pNext = NULL;
+
+      result = physical_device->dispatch_table.CreateDevice(
+         physical_device->dispatch_handle, &wrapper_create_info,
+            pAllocator, &device->dispatch_handle);
+      if (result != VK_SUCCESS) {
+         WRAPPER_LOGE("Failed driver createDevice, res %d\n", result);
+         wrapper_DestroyDevice(wrapper_device_to_handle(device),
                             &device->vk.alloc);
-      return vk_error(physical_device, result);
+         return vk_error(physical_device, result);
+      }
    }
 
    void *gdpa = physical_device->instance->dispatch_table.GetInstanceProcAddr(
