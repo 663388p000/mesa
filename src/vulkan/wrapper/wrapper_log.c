@@ -2,10 +2,13 @@
 
 #define PATH_MAX_SIZE 1024
 #define WRAPPER_SHADER_LOG_PATH "/sdcard/wrapper/shaders"
+#define WRAPPER_LOG_PATH "/sdcard/wrapper/logs"
 #define WRAPPER_VALIDATION_LOG_PATH "/sdcard/wrapper/validation"
 
 char *wrapper_log_level;
-FILE *vvl_log_file;
+FILE *wrapper_log_file;
+
+static FILE *vvl_log_file;
 
 static void get_formatted_date_time(char *buf, size_t length) 
 {  
@@ -28,7 +31,7 @@ static char *get_executable_name() {
    return path;
 }
 
-void init_wrapper_log()
+void init_wrapper_logging()
 {
    if (!wrapper_log_level) {
       wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
@@ -36,18 +39,39 @@ void init_wrapper_log()
          wrapper_log_level = "none";
    }
 
+   char date[256];                                                                   
+   get_formatted_date_time(date, 256);
+
+   if (!wrapper_log_file) {
+      char *wrapper_log_filename;
+
+      asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
+
+      wrapper_log_file = fopen(wrapper_log_filename, "w");
+      if (!wrapper_log_file) {
+         WRAPPER_LOGE("WRAPPER: Failed to open wrapper log file %s\n", wrapper_log_filename);
+      }
+   }
+
    if (!vvl_log_file) {
       char *vvl_log_filename;
-      char date[256];
-
-      get_formatted_date_time(date, 256);
+      
       asprintf(&vvl_log_filename, "%s/%s_%s", WRAPPER_VALIDATION_LOG_PATH, get_executable_name(), date);
 
       vvl_log_file = fopen(vvl_log_filename, "w");
       if (!vvl_log_file) {
-         WRAPPER_LOGE("WRAPPER: Failed to open file %s\n", vvl_log_filename);
+         WRAPPER_LOGE("WRAPPER: Failed to open vvl log file %s\n", vvl_log_filename);
       }
    }
+}
+
+void  stop_wrapper_logging()
+{
+   if (vvl_log_file)
+      fclose(vvl_log_file);
+
+   if (wrapper_log_file)
+      fclose(wrapper_log_file);
 }
 
 void dump_shader_code(const uint32_t *code, size_t size) {

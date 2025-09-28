@@ -7,10 +7,13 @@
 #include <vulkan/vulkan.h>
 
 extern char *wrapper_log_level;
-extern FILE *vvl_log_file;
+extern FILE *wrapper_log_file;
 
 void
-init_wrapper_log(void);
+init_wrapper_logging(void);
+
+void
+stop_wrapper_logging(void);
 
 void                                                                         
 dump_shader_code(const uint32_t *code, size_t size);
@@ -28,13 +31,13 @@ do {\
    if (WRAPPER_LOG_LEVEL(error) || \
       WRAPPER_LOG_LEVEL(validation) || \
       WRAPPER_LOG_LEVEL(shader)) {\
-      dprintf(STDERR_FILENO, __VA_ARGS__);\
+      fprintf(wrapper_log_file, __VA_ARGS__);\
    }\
 } while (0)
 #define WRAPPER_LOGI(...) \
 do {\
    if (WRAPPER_LOG_LEVEL(info)) {\
-      dprintf(STDERR_FILENO, __VA_ARGS__);\
+      fprintf(wrapper_log_file, __VA_ARGS__);\
    }\
 } while (0)
 #define WRAPPER_LOGS(code, size) \

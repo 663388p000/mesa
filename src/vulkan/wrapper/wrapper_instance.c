@@ -106,7 +106,7 @@ static void *get_vulkan_handle()
 
    struct stat sb;
 
-   init_wrapper_log();
+   init_wrapper_logging();
 
    if (WRAPPER_LOG_LEVEL(validation)) {
       has_intercepted_layer_paths = set_layer_paths();
@@ -351,10 +351,11 @@ wrapper_DestroyInstance(VkInstance _instance,
                         const VkAllocationCallbacks *pAllocator)
 {
    VK_FROM_HANDLE(wrapper_instance, instance, _instance);
-   if (destroy_debug_utils_messenger) {
+
+   if (destroy_debug_utils_messenger)
       destroy_debug_utils_messenger(instance->dispatch_handle, debugUtilsMessenger, pAllocator);
-      fclose(vvl_log_file);
-   }
+
+   stop_wrapper_logging();
       
    instance->dispatch_table.DestroyInstance(instance->dispatch_handle,
                                             pAllocator);
