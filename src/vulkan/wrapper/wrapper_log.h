@@ -4,24 +4,24 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <stdlib.h>
+#include <vulkan/vulkan.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+extern char *wrapper_log_level;
+extern FILE *vvl_log_file;
 
-char *get_wrapper_log_level(void);
-
-#ifdef __cplusplus
-}
-#endif
-
-char *
-get_executable_name(void);
+void
+init_wrapper_log(void);
 
 void                                                                         
 dump_shader_code(const uint32_t *code, size_t size);
 
-#define WRAPPER_LOG_LEVEL(s) (get_wrapper_log_level() && strcmp(#s, get_wrapper_log_level()) == 0)
+VKAPI_ATTR VkBool32 VKAPI_CALL 
+wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                              VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+                              const VkDebugUtilsMessengerCallbackDataEXT *callbackData,
+                              void *userData);
+
+#define WRAPPER_LOG_LEVEL(s) (wrapper_log_level && strcmp(#s, wrapper_log_level) == 0)
 
 #define WRAPPER_LOGE(...) \
 do {\

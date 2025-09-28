@@ -48,6 +48,9 @@ static PFN_vkGetInstanceProcAddr get_instance_proc_addr;
 static PFN_vkEnumerateInstanceVersion enumerate_instance_version;
 static PFN_vkEnumerateInstanceExtensionProperties enumerate_instance_extension_properties;
 static PFN_vkEnumerateInstanceLayerProperties enumerate_instance_layer_properties;
+static PFN_vkCreateDebugUtilsMessengerEXT create_debug_utils_messenger;
+static PFN_vkDestroyDebugUtilsMessengerEXT destroy_debug_utils_messenger;
+VkDebugUtilsMessengerEXT debugUtilsMessenger;
 static struct vk_instance_extension_table *supported_instance_extensions;
 
 bool has_intercepted_layer_paths = false;
@@ -60,6 +63,37 @@ bool has_intercepted_layer_paths = false;
 
 #include <dlfcn.h>
 
+static void init_debug_messenger(VkInstance instance) 
+{
+  create_debug_utils_messenger = (PFN_vkCreateDebugUtilsMessengerEXT)get_instance_proc_addr(instance, "vkCreateDebugUtilsMessengerEXT");
+  destroy_debug_utils_messenger = (PFN_vkDestroyDebugUtilsMessengerEXT)get_instance_proc_addr(instance, "vkDestroyDebugUtilsMessengerEXT");
+
+  if (create_debug_utils_messenger && destroy_debug_utils_messenger) {
+     WRAPPER_LOGI("WRAPPER: Creating debug messenger\n");
+     VkDebugUtilsMessengerCreateInfoEXT messengerInfo;
+     const VkDebugUtilsMessageSeverityFlagsEXT kSeveritiesToLog =
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+     
+     const VkDebugUtilsMessageTypeFlagsEXT kMessagesToLog =
+        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+
+     messengerInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+     messengerInfo.pNext = NULL;
+     messengerInfo.flags = 0;
+     messengerInfo.messageSeverity = kSeveritiesToLog;
+     messengerInfo.messageType = kMessagesToLog;
+     messengerInfo.pfnUserCallback = &wrapper_debug_utils_messenger;
+     messengerInfo.pUserData = NULL;
+
+     create_debug_utils_messenger(instance, &messengerInfo, NULL, &debugUtilsMessenger);
+   }
+  
+}
+
 static void *get_vulkan_handle() 
 {
    char *path = getenv("ADRENOTOOLS_DRIVER_PATH");
@@ -71,6 +105,8 @@ static void *get_vulkan_handle()
 #endif
 
    struct stat sb;
+
+   init_wrapper_log();
 
    if (WRAPPER_LOG_LEVEL(validation)) {
       has_intercepted_layer_paths = set_layer_paths();
@@ -261,7 +297,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    }
    enumerate_instance_version(&wrapper_application_info.apiVersion);
    wrapper_create_info.pApplicationInfo = &wrapper_application_info;
-
+   
    if (WRAPPER_LOG_LEVEL(validation)) {
       if (!has_intercepted_layer_paths)
          return vk_error(NULL, VK_ERROR_LAYER_NOT_PRESENT);
@@ -296,6 +332,11 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       vk_free2(vk_default_allocator(), pAllocator, instance);
       return vk_error(NULL, result);
    }
+
+   if (WRAPPER_LOG_LEVEL(validation)) {
+      init_debug_messenger(instance->dispatch_handle);
+   }
+   
    vk_instance_dispatch_table_load(&instance->dispatch_table,
                                    get_instance_proc_addr,
                                    instance->dispatch_handle);
@@ -310,6 +351,11 @@ wrapper_DestroyInstance(VkInstance _instance,
                         const VkAllocationCallbacks *pAllocator)
 {
    VK_FROM_HANDLE(wrapper_instance, instance, _instance);
+   if (destroy_debug_utils_messenger) {
+      destroy_debug_utils_messenger(instance->dispatch_handle, debugUtilsMessenger, pAllocator);
+      fclose(vvl_log_file);
+   }
+      
    instance->dispatch_table.DestroyInstance(instance->dispatch_handle,
                                             pAllocator);
 }

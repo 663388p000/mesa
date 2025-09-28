@@ -1,10 +1,21 @@
 #include "wrapper_log.h"
 
 #define PATH_MAX_SIZE 1024
-#define WRAPPER_LOG_PATH "/sdcard/Wrapper"
-#define WRAPPER_SHADER_LOG_PATH "/sdcard/Wrapper/shaders"
+#define WRAPPER_SHADER_LOG_PATH "/sdcard/wrapper/shaders"
+#define WRAPPER_VALIDATION_LOG_PATH "/sdcard/wrapper/validation"
 
-char *get_executable_name() {
+char *wrapper_log_level;
+FILE *vvl_log_file;
+
+static void get_formatted_date_time(char *buf, size_t length) 
+{  
+   time_t rawtime = time(NULL);
+   struct tm *ptm = localtime(&rawtime);
+
+   strftime(buf, 256, "%F_%H-%M-%S", ptm);
+}
+
+static char *get_executable_name() {
    char *path = malloc(PATH_MAX);
 
    int fd = open("/proc/self/cmdline", O_RDONLY);
@@ -17,12 +28,26 @@ char *get_executable_name() {
    return path;
 }
 
-char* get_wrapper_log_level() {
-   char *wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
-   if (!wrapper_log_level)
-      wrapper_log_level = "none";
+void init_wrapper_log()
+{
+   if (!wrapper_log_level) {
+      wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
+      if (!wrapper_log_level)
+         wrapper_log_level = "none";
+   }
 
-   return wrapper_log_level;
+   if (!vvl_log_file) {
+      char *vvl_log_filename;
+      char date[256];
+
+      get_formatted_date_time(date, 256);
+      asprintf(&vvl_log_filename, "%s/%s_%s", WRAPPER_VALIDATION_LOG_PATH, get_executable_name(), date);
+
+      vvl_log_file = fopen(vvl_log_filename, "w");
+      if (!vvl_log_file) {
+         WRAPPER_LOGE("WRAPPER: Failed to open file %s\n", vvl_log_filename);
+      }
+   }
 }
 
 void dump_shader_code(const uint32_t *code, size_t size) {
@@ -36,4 +61,19 @@ void dump_shader_code(const uint32_t *code, size_t size) {
    fclose(fp); 
 
    index++;
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL
+wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                              VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+                              const VkDebugUtilsMessengerCallbackDataEXT *callbackData,
+                              void *userData)
+{
+   const char* messageIdName = callbackData->pMessageIdName;
+   int32_t messageIdNumber = callbackData->messageIdNumber;
+   const char* message = callbackData->pMessage;
+
+   fprintf(vvl_log_file, "[%s] Code %i : %s\n", messageIdName, messageIdNumber, message);
+
+   return 0;
 }
