@@ -24,27 +24,14 @@ wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeve
                               const VkDebugUtilsMessengerCallbackDataEXT *callbackData,
                               void *userData);
 
-#define WRAPPER_LOG_LEVEL(s) (wrapper_log_level && strcmp(#s, wrapper_log_level) == 0)
+#define WRAPPER_LOG_LEVEL(s) (wrapper_log_level && strstr(wrapper_log_level, #s))
 
-#define WRAPPER_LOGE(...) \
+#define WRAPPER_LOG(level, fmt, ...) \
 do {\
-   if (WRAPPER_LOG_LEVEL(error) || \
-      WRAPPER_LOG_LEVEL(validation) || \
-      WRAPPER_LOG_LEVEL(shader)) {\
-      fprintf(wrapper_log_file, __VA_ARGS__);\
+   if (WRAPPER_LOG_LEVEL(level)) {\
+      fprintf(wrapper_log_file, "[%s]: " fmt "\n", #level, ##__VA_ARGS__);\
+      fflush(wrapper_log_file);\
    }\
-} while (0)
-#define WRAPPER_LOGI(...) \
-do {\
-   if (WRAPPER_LOG_LEVEL(info)) {\
-      fprintf(wrapper_log_file, __VA_ARGS__);\
-   }\
-} while (0)
-#define WRAPPER_LOGS(code, size) \
-do {\
-   if (WRAPPER_LOG_LEVEL(shader)) { \
-      dump_shader_code(code, size); \
-   } \
 } while (0)
 
 #endif

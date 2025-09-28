@@ -36,14 +36,14 @@ bool set_layer_paths() {
    get_function_pointer(setLayerPaths, "_ZN7android11GraphicsEnv13setLayerPathsEPNS_21NativeLoaderNamespaceERKNSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEE");
 
    if (!getInstance || !getLayerPaths || !getAppNamespace || !setLayerPaths) {
-      WRAPPER_LOGE("WRAPPER: Failed to get function pointers from libgraphicsenv.so\n");
+      WRAPPER_LOG(error, "Failed to get function pointers from libgraphicsenv.so");
       return false;    	
    }
 
    void *instance = getInstance();
 
    if (!instance) {
-      WRAPPER_LOGE("WRAPPER: Failed to obtain GraphicsEnv instance\n");
+      WRAPPER_LOG(error, "Failed to obtain GraphicsEnv instance");
       return false;
    }
 
@@ -62,7 +62,7 @@ bool set_layer_paths() {
    auto path = getLayerPaths(instance);
 
    if (path != env_layers_path) {
-      WRAPPER_LOGE("WRAPPER: Failed to change layer paths\n");
+      WRAPPER_LOG(error, "Failed to change layer paths");
       return false;
    }
 

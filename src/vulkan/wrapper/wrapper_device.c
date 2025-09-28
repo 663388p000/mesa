@@ -96,7 +96,7 @@ static void unlink_unsupported_struct(VkDeviceCreateInfo *create_info, struct wr
           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
              if (pdevice->base_supported_extensions.EXT_robustness2)
                 break;
-             WRAPPER_LOGI("WRAPPER: Unlinking VkPhysicalDeviceRobustness2FeaturesEXT from pNext chain\n");
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceRobustness2FeaturesEXT from vkDeviceCreateInfo pNext chain");
              if (!prev) {
                 create_info->pNext = current->pNext;
                 current = current->pNext;
@@ -195,7 +195,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
                            &dispatch_table, pCreateInfo, pAllocator);
 
    if (result != VK_SUCCESS) {
-      WRAPPER_LOGE("Failed to init Vulkan device, res %d\n", result);
+      WRAPPER_LOG(error, "Failed to init Vulkan device, res %d", result);
       vk_free2(&physical_device->instance->vk.alloc, pAllocator,
                device);
       return vk_error(physical_device, result);
@@ -274,7 +274,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
 
    if (WRAPPER_LOG_LEVEL(info)) {
       for (int i = 0; i < wrapper_enable_extension_count; i++) {
-         WRAPPER_LOGI("WRAPPER: Enabling device extension %s\n", wrapper_enable_extensions[i]);
+         WRAPPER_LOG(info, "Enabling device extension %s", wrapper_enable_extensions[i]);
       }
    }
    
@@ -289,7 +289,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
          physical_device->dispatch_handle, &wrapper_create_info,
             pAllocator, &device->dispatch_handle);
       if (result != VK_SUCCESS) {
-         WRAPPER_LOGE("Failed driver createDevice, res %d\n", result);
+         WRAPPER_LOG(error, "Failed driver createDevice, res %d", result);
          wrapper_DestroyDevice(wrapper_device_to_handle(device),
                             &device->vk.alloc);
          return vk_error(physical_device, result);
@@ -445,7 +445,7 @@ wrapper_CreateShaderModule(VkDevice _device,
    VK_FROM_HANDLE(wrapper_device, device, _device);
    
    if (WRAPPER_LOG_LEVEL(shader))
-      WRAPPER_LOGS(pCreateInfo->pCode, pCreateInfo->codeSize);
+      dump_shader_code(pCreateInfo->pCode, pCreateInfo->codeSize);
    
    return device->dispatch_table.CreateShaderModule(
       device->dispatch_handle, pCreateInfo, pAllocator, pShaderModule);

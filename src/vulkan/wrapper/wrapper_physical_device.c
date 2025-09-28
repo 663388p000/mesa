@@ -60,7 +60,7 @@ wrapper_apply_device_extension_blacklist(struct wrapper_physical_device *physica
    while (extension != NULL) {
       for (int i = 0; i < VK_DEVICE_EXTENSION_COUNT; i++) {
          if (strstr(extension, vk_device_extensions[i].extensionName)) {
-            WRAPPER_LOGI("WRAPPER: Blacklisting extension %s\n", extension);
+            WRAPPER_LOG(info, "Blacklisting extension %s", extension);
             physical_device->vk.supported_extensions.extensions[i] = false;
          }
       }
@@ -142,7 +142,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       	supported_features->memoryMapPlaced = true;
       	supported_features->memoryUnmapReserve = true;
       } else {
-        WRAPPER_LOGI("WRAPPER: Disabling VK_EXT_map_memory_placed\n");
+        WRAPPER_LOG(info, "Disabling VK_EXT_map_memory_placed");
       	pdevice->vk.supported_extensions.EXT_map_memory_placed = false;
         pdevice->vk.supported_extensions.KHR_map_memory2 = false;
       	supported_features->memoryMapPlaced = false;
@@ -202,16 +202,16 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       /* HACK: make newer dxvk work on Qualcomm proprietary drivers */
       
       if (strstr(engine_name, "DXVK") && pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
-         WRAPPER_LOGI("WRAPPER: Disabling VK_EXT_line_rasterization\n");
+         WRAPPER_LOG(info, "Disabling VK_EXT_line_rasterization");
          pdevice->vk.supported_extensions.EXT_line_rasterization = false;	
          if (engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
-            WRAPPER_LOGI("WRAPPER: Forcing VK_KHR_pipeline_library\n");
+            WRAPPER_LOG(info, "Forcing VK_KHR_pipeline_library");
             pdevice->vk.supported_extensions.KHR_pipeline_library = true;
          }
       }
 
       if (strstr(engine_name, "DXVK") && pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
-         WRAPPER_LOGI("WRAPPER: Forcing VK_EXT_robustness2\n");
+         WRAPPER_LOG(info, "Forcing VK_EXT_robustness2");
          pdevice->vk.supported_extensions.EXT_robustness2 = true;
       }
 
@@ -406,7 +406,7 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      WRAPPER_LOGI("WRAPPER: Faking properties for BCn %d image format\n", format);
+      WRAPPER_LOG(info, "Faking properties for BCn %d image format", format);
       if (type & VK_IMAGE_TYPE_1D) {
          pImageFormatProperties->maxExtent.width = pdevice->properties2.properties.limits.maxImageDimension1D;
          pImageFormatProperties->maxExtent.height = 1;
@@ -480,7 +480,7 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      WRAPPER_LOGI("WRAPPER: Faking properties for BCn %d image format\n", pImageFormatInfo->format);
+      WRAPPER_LOG(info, "Faking properties for BCn %d image format", pImageFormatInfo->format);
       if (pImageFormatInfo->type & VK_IMAGE_TYPE_1D) {
          pImageFormatProperties->imageFormatProperties.maxExtent.width = pdevice->properties2.properties.limits.maxImageDimension1D;
          pImageFormatProperties->imageFormatProperties.maxExtent.height = 1;
@@ -555,7 +555,7 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      WRAPPER_LOGI("WRAPPER: Faking properties for BCn %d format\n", format);
+      WRAPPER_LOG(info, "Faking properties for BCn %d format", format);
       pFormatProperties->optimalTilingFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
       break;
    default:

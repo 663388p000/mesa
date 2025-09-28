@@ -42,25 +42,25 @@ void init_wrapper_logging()
    char date[256];                                                                   
    get_formatted_date_time(date, 256);
 
-   if (!wrapper_log_file) {
+   if (!wrapper_log_file && !WRAPPER_LOG_LEVEL(none)) {
       char *wrapper_log_filename;
 
       asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
 
       wrapper_log_file = fopen(wrapper_log_filename, "w");
       if (!wrapper_log_file) {
-         WRAPPER_LOGE("WRAPPER: Failed to open wrapper log file %s\n", wrapper_log_filename);
+         WRAPPER_LOG(error, "Failed to open wrapper log file %s", wrapper_log_filename);
       }
    }
 
-   if (!vvl_log_file) {
+   if (!vvl_log_file && WRAPPER_LOG_LEVEL(validation)) {
       char *vvl_log_filename;
       
       asprintf(&vvl_log_filename, "%s/%s_%s", WRAPPER_VALIDATION_LOG_PATH, get_executable_name(), date);
 
       vvl_log_file = fopen(vvl_log_filename, "w");
       if (!vvl_log_file) {
-         WRAPPER_LOGE("WRAPPER: Failed to open vvl log file %s\n", vvl_log_filename);
+         WRAPPER_LOG(error, "Failed to open vvl log file %s", vvl_log_filename);
       }
    }
 }
@@ -98,6 +98,7 @@ wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeve
    const char* message = callbackData->pMessage;
 
    fprintf(vvl_log_file, "[%s] Code %i : %s\n", messageIdName, messageIdNumber, message);
+   fflush(vvl_log_file);
 
    return 0;
 }

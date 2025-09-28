@@ -69,7 +69,7 @@ static void init_debug_messenger(VkInstance instance)
   destroy_debug_utils_messenger = (PFN_vkDestroyDebugUtilsMessengerEXT)get_instance_proc_addr(instance, "vkDestroyDebugUtilsMessengerEXT");
 
   if (create_debug_utils_messenger && destroy_debug_utils_messenger) {
-     WRAPPER_LOGI("WRAPPER: Creating debug messenger\n");
+     WRAPPER_LOG(info, "Creating debug messenger");
      VkDebugUtilsMessengerCreateInfoEXT messengerInfo;
      const VkDebugUtilsMessageSeverityFlagsEXT kSeveritiesToLog =
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
@@ -265,7 +265,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
                              pAllocator ? pAllocator : vk_default_allocator());
 
    if (result != VK_SUCCESS) {
-      WRAPPER_LOGE("WRAPPER: Failed to init instance, res %d\n", result);
+      WRAPPER_LOG(error, "Failed to init instance, res %d", result);
       vk_free2(vk_default_allocator(), pAllocator, instance);
       return vk_error(NULL, result);
    }
@@ -306,7 +306,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       enumerate_instance_layer_properties(&layer_count, NULL);
 
       if (layer_count == 0) {
-        WRAPPER_LOGE("WRAPPER: Failed to find Vulkan Validation layer\n"); 
+        WRAPPER_LOG(error, "Failed to find Vulkan Validation layer"); 
       	return vk_error(NULL, VK_ERROR_LAYER_NOT_PRESENT);
       }
 
@@ -327,7 +327,7 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    result = create_instance(&wrapper_create_info, pAllocator,
                             &instance->dispatch_handle);
    if (result != VK_SUCCESS) {
-      WRAPPER_LOGE("WRAPPER: Failed driver createInstance, res %d\n", result);
+      WRAPPER_LOG(error, "Failed driver createInstance, res %d", result);
       vk_instance_finish(&instance->vk);
       vk_free2(vk_default_allocator(), pAllocator, instance);
       return vk_error(NULL, result);
