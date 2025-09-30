@@ -50,7 +50,7 @@ enum wsi_image_type {
    WSI_IMAGE_TYPE_CPU,
    WSI_IMAGE_TYPE_DRM,
    WSI_IMAGE_TYPE_DXGI,
-   WSI_IMAGE_TYPE_AHB,
+   WSI_IMAGE_TYPE_ANDROID,
 };
 
 struct wsi_base_image_params {
@@ -457,11 +457,11 @@ VK_DEFINE_NONDISP_HANDLE_CASTS(wsi_swapchain, base, VkSwapchainKHR,
                                VK_OBJECT_TYPE_SWAPCHAIN_KHR)
 
 enum wsi_swapchain_blit_type
-wsi_get_ahardware_buffer_blit_type(const struct wsi_device *wsi,
+wsi_get_android_buffer_blit_type(const struct wsi_device *wsi,
                       const struct wsi_base_image_params *params,
                                    VkDevice device);
 
-VkResult wsi_configure_ahardware_buffer_image(
+VkResult wsi_configure_android_buffer_image(
    const struct wsi_swapchain *chain,
    const VkSwapchainCreateInfoKHR *pCreateInfo,
    const struct wsi_base_image_params *params,

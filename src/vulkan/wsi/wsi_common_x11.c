@@ -2596,11 +2596,12 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
       };
       image_params = &cpu_image_params.base;
 #ifdef __TERMUX__
-   } else if (wsi_device->wants_ahardware_buffer) {
+   } else {
       image_params = &(struct wsi_base_image_params){
-         .image_type = WSI_IMAGE_TYPE_AHB,
+         .image_type = WSI_IMAGE_TYPE_ANDROID,
       };
-#endif
+   }
+#else
    } else {
 #ifdef HAVE_X11_DRM
       drm_image_params = (struct wsi_drm_image_params) {
@@ -2630,7 +2631,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
       unreachable("X11 DRM support missing!");
 #endif
    }
-
+#endif
    result = wsi_swapchain_init(wsi_device, &chain->base, device, pCreateInfo,
                                image_params, pAllocator);
 

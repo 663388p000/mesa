@@ -397,8 +397,8 @@ get_blit_type(const struct wsi_device *wsi,
          WSI_SWAPCHAIN_BUFFER_BLIT : WSI_SWAPCHAIN_NO_BLIT;
    }
 #ifdef __TERMUX__
-   case WSI_IMAGE_TYPE_AHB: {
-      return wsi_get_ahardware_buffer_blit_type(wsi, params, device);
+   case WSI_IMAGE_TYPE_ANDROID: {
+      return wsi_get_android_buffer_blit_type(wsi, params, device);
    }
 #endif
 #ifdef HAVE_LIBDRM
@@ -435,8 +435,8 @@ configure_image(const struct wsi_swapchain *chain,
       return wsi_configure_cpu_image(chain, pCreateInfo, cpu_params, info);
    }
 #ifdef __TERMUX__
-   case WSI_IMAGE_TYPE_AHB: {
-      return wsi_configure_ahardware_buffer_image(chain, pCreateInfo, params, info);
+   case WSI_IMAGE_TYPE_ANDROID: {
+      return wsi_configure_android_buffer_image(chain, pCreateInfo, params, info);
    }
 #endif
 #ifdef HAVE_LIBDRM

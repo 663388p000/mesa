@@ -7,7 +7,7 @@
 #define AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM 5
 
 enum wsi_swapchain_blit_type
-wsi_get_ahardware_buffer_blit_type(const struct wsi_device *wsi,
+wsi_get_android_buffer_blit_type(const struct wsi_device *wsi,
                       const struct wsi_base_image_params *params,
                                    VkDevice device)
 {
@@ -282,13 +282,13 @@ to_ahardware_buffer_format(VkFormat format) {
 }
 
 VkResult
-wsi_configure_ahardware_buffer_image(
+wsi_configure_android_buffer_image(
    const struct wsi_swapchain *chain,
    const VkSwapchainCreateInfoKHR *pCreateInfo,
    const struct wsi_base_image_params *params,
    struct wsi_image_info *info)
 {
-   assert(params->image_type == WSI_IMAGE_TYPE_AHB);
+   assert(params->image_type == WSI_IMAGE_TYPE_ANDROID);
    assert(chain->blit.type == WSI_SWAPCHAIN_NO_BLIT ||
           chain->blit.type == WSI_SWAPCHAIN_IMAGE_BLIT);
 
