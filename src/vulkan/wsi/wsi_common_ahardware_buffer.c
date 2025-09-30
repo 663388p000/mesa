@@ -182,13 +182,8 @@ wsi_create_ahardware_buffer_blit_context(const struct wsi_swapchain *chain,
    if (result != VK_SUCCESS)
       return result;
 
-   const VkExternalFormatANDROID external_format = {
-      .sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID,
-      .externalFormat = ahardware_buffer_format_props.externalFormat,
-   };
    const VkExternalMemoryImageCreateInfo external_memory_info = {
       .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-      .pNext = &external_format,
       .handleTypes = handle_types,
    };
    const VkImageCreateInfo image_info = {
