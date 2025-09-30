@@ -73,6 +73,7 @@ static void init_debug_messenger(VkInstance instance)
      VkDebugUtilsMessengerCreateInfoEXT messengerInfo;
      const VkDebugUtilsMessageSeverityFlagsEXT kSeveritiesToLog =
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
      
