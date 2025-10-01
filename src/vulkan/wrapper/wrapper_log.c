@@ -42,12 +42,22 @@ void init_wrapper_logging()
    char date[256];                                                                   
    get_formatted_date_time(date, 256);
 
-   if (!wrapper_log_file && !WRAPPER_LOG_LEVEL(none)) {
+   if (!wrapper_log_file && (WRAPPER_LOG_LEVEL(info) || WRAPPER_LOG_LEVEL(error))) {
       char *wrapper_log_filename;
 
-      asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
+      wrapper_log_filename = getenv("WRAPPER_LOG_FILE");
 
-      wrapper_log_file = fopen(wrapper_log_filename, "w");
+      if (!wrapper_log_filename) {
+         asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
+      }
+
+      if (!strcmp("stdout", wrapper_log_filename)) {
+         wrapper_log_file = stdout;
+      }
+      else {
+         wrapper_log_file = fopen(wrapper_log_filename, "w");
+      }
+      
       if (!wrapper_log_file) {
          WRAPPER_LOG(error, "Failed to open wrapper log file %s", wrapper_log_filename);
       }
