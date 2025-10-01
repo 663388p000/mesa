@@ -398,7 +398,7 @@ get_blit_type(const struct wsi_device *wsi,
    }
 #ifdef __TERMUX__
    case WSI_IMAGE_TYPE_ANDROID: {
-      return wsi_get_android_buffer_blit_type(wsi, params, device);
+      return wsi_get_android_blit_type(wsi, params, device);
    }
 #endif
 #ifdef HAVE_LIBDRM
@@ -436,7 +436,7 @@ configure_image(const struct wsi_swapchain *chain,
    }
 #ifdef __TERMUX__
    case WSI_IMAGE_TYPE_ANDROID: {
-      return wsi_configure_android_buffer_image(chain, pCreateInfo, params, info);
+      return wsi_configure_android_image(chain, pCreateInfo, params, info);
    }
 #endif
 #ifdef HAVE_LIBDRM
