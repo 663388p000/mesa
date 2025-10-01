@@ -6,17 +6,13 @@
 
 #define AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM 5
 
-enum wsi_swapchain_blit_type
-wsi_get_android_blit_type(const struct wsi_device *wsi,
-                      const struct wsi_base_image_params *params,
-                                   VkDevice device)
+static enum wsi_swapchain_blit_type
+wsi_get_ahardware_buffer_blit_type(const struct wsi_device *wsi,
+                            VkDevice device)
 {
    AHardwareBuffer *ahardware_buffer;
    VkResult result;
-
-   if (wsi->needs_blit)
-      return WSI_SWAPCHAIN_IMAGE_BLIT;
-
+   
    if (AHardwareBuffer_allocate(&(AHardwareBuffer_Desc){
       .width = 500,
       .height = 500,
@@ -79,6 +75,18 @@ wsi_get_android_blit_type(const struct wsi_device *wsi,
       return WSI_SWAPCHAIN_IMAGE_BLIT;
 
    return WSI_SWAPCHAIN_NO_BLIT;
+}
+
+
+enum wsi_swapchain_blit_type
+wsi_get_android_blit_type(const struct wsi_device *wsi,
+                      const struct wsi_base_image_params *params,
+                                   VkDevice device)
+{
+   if (wsi->needs_blit)
+      return WSI_SWAPCHAIN_IMAGE_BLIT;
+
+   return wsi_get_ahardware_buffer_blit_type(wsi, device);
 }
 
 static VkResult
@@ -281,33 +289,28 @@ to_ahardware_buffer_format(VkFormat format) {
    }
 }
 
-VkResult
-wsi_configure_android_image(
-   const struct wsi_swapchain *chain,
-   const VkSwapchainCreateInfoKHR *pCreateInfo,
-   const struct wsi_base_image_params *params,
-   struct wsi_image_info *info)
+static VkResult
+wsi_configure_ahardware_buffer_image(const struct wsi_swapchain *chain,
+                                     const VkSwapchainCreateInfoKHR *pCreateInfo,
+                                     const bool blit,
+                                     struct wsi_image_info *info)
 {
-   assert(params->image_type == WSI_IMAGE_TYPE_ANDROID);
-   assert(chain->blit.type == WSI_SWAPCHAIN_NO_BLIT ||
-          chain->blit.type == WSI_SWAPCHAIN_IMAGE_BLIT);
-
-   const bool blit = chain->blit.type == WSI_SWAPCHAIN_IMAGE_BLIT;
    VkResult result;
 
    VkExternalMemoryHandleTypeFlags handle_type =
       VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
-
+   
    result = wsi_configure_image(chain, pCreateInfo,
-                                blit ? 0 : handle_type, info);
+                                   blit ? 0 : handle_type, info);
    if (result != VK_SUCCESS)
       return result;
-
+   
    VkPhysicalDeviceExternalImageFormatInfo external_format_info = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
       .pNext = NULL,
       .handleType = handle_type,
    };
+
    VkPhysicalDeviceImageFormatInfo2 format_info = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
       .pNext = &external_format_info,
@@ -317,7 +320,7 @@ wsi_configure_android_image(
       .tiling = blit ? VK_IMAGE_TILING_LINEAR
                      : info->create.tiling,
       .usage = blit ? VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                     : info->create.usage,
+                    : info->create.usage,
       .flags = blit ? 0u : info->create.flags,
    };
    VkAndroidHardwareBufferUsageANDROID ahardware_buffer_usage = {
@@ -332,14 +335,14 @@ wsi_configure_android_image(
       chain->wsi->pdevice, &format_info, &format_props);
    if (result != VK_SUCCESS)
       return result;
-
+   
    info->ahardware_buffer_desc = vk_zalloc(&chain->alloc,
       sizeof(AHardwareBuffer_Desc), 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!info->ahardware_buffer_desc) {
       wsi_destroy_image_info(chain, info);
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
-
+   
    *info->ahardware_buffer_desc = (AHardwareBuffer_Desc) {
       .width = pCreateInfo->imageExtent.width,
       .height = pCreateInfo->imageExtent.height,
@@ -352,9 +355,30 @@ wsi_configure_android_image(
                AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
                AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
    };
-
+   
    if (info->ahardware_buffer_desc->usage & AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER)
       info->ahardware_buffer_desc->usage &= ~AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER;
+
+   return VK_SUCCESS;
+}
+
+VkResult
+wsi_configure_android_image(
+   const struct wsi_swapchain *chain,
+   const VkSwapchainCreateInfoKHR *pCreateInfo,
+   const struct wsi_base_image_params *params,
+   struct wsi_image_info *info)
+{
+   assert(params->image_type == WSI_IMAGE_TYPE_ANDROID);
+   assert(chain->blit.type == WSI_SWAPCHAIN_NO_BLIT ||
+          chain->blit.type == WSI_SWAPCHAIN_IMAGE_BLIT);
+
+   VkResult result;
+
+   const bool blit = chain->blit.type == WSI_SWAPCHAIN_IMAGE_BLIT;
+
+   if ((result = wsi_configure_ahardware_buffer_image(chain, pCreateInfo, blit, info)) != VK_SUCCESS)
+      return VK_SUCCESS;
 
    if (blit) {
       wsi_configure_image_blit_image(chain, info);
