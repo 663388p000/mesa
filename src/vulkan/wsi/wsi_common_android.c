@@ -323,37 +323,6 @@ wsi_configure_ahardware_buffer_image(const struct wsi_swapchain *chain,
    if (result != VK_SUCCESS)
       return result;
    
-   VkPhysicalDeviceExternalImageFormatInfo external_format_info = {
-      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
-      .pNext = NULL,
-      .handleType = handle_type,
-   };
-
-   VkPhysicalDeviceImageFormatInfo2 format_info = {
-      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
-      .pNext = &external_format_info,
-      .format = blit ? VK_FORMAT_R8G8B8A8_UNORM
-                     : info->create.format,
-      .type = VK_IMAGE_TYPE_2D,
-      .tiling = blit ? VK_IMAGE_TILING_LINEAR
-                     : info->create.tiling,
-      .usage = blit ? VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                    : info->create.usage,
-      .flags = blit ? 0u : info->create.flags,
-   };
-   VkAndroidHardwareBufferUsageANDROID ahardware_buffer_usage = {
-      .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_USAGE_ANDROID,
-      .pNext = NULL,
-   };
-   VkImageFormatProperties2 format_props = {
-      .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
-      .pNext = &ahardware_buffer_usage,
-   };
-   result = chain->wsi->GetPhysicalDeviceImageFormatProperties2(
-      chain->wsi->pdevice, &format_info, &format_props);
-   if (result != VK_SUCCESS)
-      return result;
-   
    info->ahardware_buffer_desc = vk_zalloc(&chain->alloc,
       sizeof(AHardwareBuffer_Desc), 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!info->ahardware_buffer_desc) {
@@ -368,14 +337,10 @@ wsi_configure_ahardware_buffer_image(const struct wsi_swapchain *chain,
       .format = blit
          ? AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM
          : to_ahardware_buffer_format(info->create.format),
-      .usage = ahardware_buffer_usage.androidHardwareBufferUsage |
-               AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
+      .usage = AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
                AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
                AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
    };
-   
-   if (info->ahardware_buffer_desc->usage & AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER)
-      info->ahardware_buffer_desc->usage &= ~AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER;
 
    return VK_SUCCESS;
 }
