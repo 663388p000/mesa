@@ -64,10 +64,10 @@ wrapper_append_required_extensions(const struct vk_device *device,
                                   uint32_t *count,
                                   const char **exts) {
 #define REQUIRED_EXTENSION(name) \
-   if (!device->enabled_extensions.name && \
-       device->physical->supported_extensions.name) { \
+   if (device->physical->supported_extensions.name) { \
       exts[(*count)++] = "VK_" #name; \
    }
+   
    REQUIRED_EXTENSION(KHR_external_fence);
    REQUIRED_EXTENSION(KHR_external_semaphore);
    REQUIRED_EXTENSION(KHR_external_memory);
@@ -79,6 +79,7 @@ wrapper_append_required_extensions(const struct vk_device *device,
    REQUIRED_EXTENSION(KHR_maintenance1)
    REQUIRED_EXTENSION(KHR_maintenance2)
    REQUIRED_EXTENSION(KHR_image_format_list)
+   REQUIRED_EXTENSION(KHR_swapchain);
    REQUIRED_EXTENSION(KHR_timeline_semaphore);
    REQUIRED_EXTENSION(EXT_external_memory_host);
    REQUIRED_EXTENSION(EXT_external_memory_dma_buf);

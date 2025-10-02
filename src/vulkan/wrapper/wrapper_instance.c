@@ -222,11 +222,11 @@ set_wrapper_required_extensions(const struct vk_instance *instance,
    uint32_t count = *enable_extension_count;
 #define REQUIRED_EXTENSION(name) \
    assert (count < VK_INSTANCE_EXTENSION_COUNT); \
-   if (!instance->enabled_extensions.name && \
-       supported_instance_extensions->name) { \
+   if (supported_instance_extensions->name) { \
       enable_extensions[count++] = "VK_" #name; \
    }
    REQUIRED_EXTENSION(KHR_get_physical_device_properties2);
+   REQUIRED_EXTENSION(KHR_surface);
    REQUIRED_EXTENSION(KHR_external_fence_capabilities);
    REQUIRED_EXTENSION(KHR_external_memory_capabilities);
    REQUIRED_EXTENSION(KHR_external_semaphore_capabilities);
