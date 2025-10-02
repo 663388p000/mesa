@@ -141,58 +141,6 @@ wrapper_allocate_memory_dmaheap(struct wrapper_device *device,
 }
 
 static VkResult
-wrapper_allocate_memory_dmabuf(struct wrapper_device *device,
-                               const VkMemoryAllocateInfo* pAllocateInfo,
-                               const VkAllocationCallbacks* pAllocator,
-                               VkDeviceMemory* pMemory,
-                               int *out_fd) {
-   VkExportMemoryAllocateInfo export_memory_info;
-   VkMemoryAllocateInfo allocate_info;
-   VkResult result;
-
-   export_memory_info = (VkExportMemoryAllocateInfo) {
-      .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
-      .pNext = pAllocateInfo->pNext,
-      .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-   };
-   allocate_info = *pAllocateInfo;
-   allocate_info.pNext = &export_memory_info;
-
-   result = device->dispatch_table.AllocateMemory(device->dispatch_handle,
-                                                  &allocate_info,
-                                                  pAllocator,
-                                                  pMemory);
-   if (result != VK_SUCCESS) {
-      WRAPPER_LOG(error, "Failed to export dmabuf memory, res %d", result);
-      return result;
-   }
-
-   result = device->dispatch_table.GetMemoryFdKHR(
-      device->dispatch_handle,
-      &(VkMemoryGetFdInfoKHR) {
-         .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
-         .memory = *pMemory,
-         .handleType =
-            VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-      },
-      out_fd);
-
-   if (result != VK_SUCCESS) {
-      WRAPPER_LOG(error, "Failed to import dmabuf fd, res %d", result);
-      return result;
-   }
-
-   if (lseek(*out_fd, 0, SEEK_SET) ||
-       lseek(*out_fd, 0, SEEK_END) < pAllocateInfo->allocationSize) {
-      WRAPPER_LOG(error, "Invalid dmabuf fd");
-      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
-   }
-
-   lseek(*out_fd, 0, SEEK_SET);
-   return VK_SUCCESS;
-}
-
-static VkResult
 wrapper_allocate_memory_ahardware_buffer(struct wrapper_device *device,
                                          const VkMemoryAllocateInfo* pAllocateInfo,
                                          const VkAllocationCallbacks* pAllocator,
@@ -356,14 +304,8 @@ wrapper_AllocateMemory(VkDevice _device,
       goto out;
    }
   
-   result = wrapper_allocate_memory_dmabuf(device, pAllocateInfo,
-      pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
-
-   if (result != VK_SUCCESS) {
-      wrapper_device_memory_reset(mem);
-      result = wrapper_allocate_memory_dmaheap(device,
-         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
-   }
+   result = wrapper_allocate_memory_dmaheap(device,
+      pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
 
    if (result != VK_SUCCESS) {
       wrapper_device_memory_reset(mem);
