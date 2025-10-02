@@ -200,27 +200,36 @@ wrapper_allocate_memory_ahardware_buffer(struct wrapper_device *device,
                                          AHardwareBuffer **pAHardwareBuffer) {
    VkExportMemoryAllocateInfo export_memory_info;
    VkMemoryAllocateInfo allocate_info;
+   const VkMemoryDedicatedAllocateInfo *memory_dedicated_info = NULL;
    VkResult result;
 
+   
    export_memory_info = (VkExportMemoryAllocateInfo) {
       .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
       .pNext = pAllocateInfo->pNext,
       .handleTypes =
          VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
    };
-   
+
+   memory_dedicated_info = vk_find_struct_const(pAllocateInfo->pNext, MEMORY_DEDICATED_ALLOCATE_INFO);
+  
    allocate_info = *pAllocateInfo;
    allocate_info.pNext = &export_memory_info;
-
+  
+   if (memory_dedicated_info && memory_dedicated_info->image != VK_NULL_HANDLE) {
+      WRAPPER_LOG(info, "VkMemoryDedicatedInfo struct with a non NULL image detected, patching allocationSize");
+      allocate_info.allocationSize = 0;
+   }
+   
    result = device->dispatch_table.AllocateMemory(device->dispatch_handle,
                                                   &allocate_info,
                                                   pAllocator,
                                                   pMemory);
    if (result != VK_SUCCESS) {
-      WRAPPER_LOG(error, "Failed to export ahb memory, res %d", result);
+      WRAPPER_LOG(error, "Failed to allocate ahb memory, res %d", result);
       return result;
    }
-  
+   
    result = device->dispatch_table.GetMemoryAndroidHardwareBufferANDROID(
       device->dispatch_handle,
       &(VkMemoryGetAndroidHardwareBufferInfoANDROID) {
@@ -320,14 +329,14 @@ wrapper_AllocateMemory(VkDevice _device,
    VkMemoryPropertyFlags property_flags =
       device->physical->memory_properties.memoryTypes[
          pAllocateInfo->memoryTypeIndex].propertyFlags;
-
+   
    if (!(property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
       goto fallback;
-
+    
    if (!device->vk.enabled_features.memoryMapPlaced ||
        !device->vk.enabled_extensions.EXT_map_memory_placed)
       goto fallback;
-
+      
    if (vk_find_struct_const(pAllocateInfo, IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID))
       goto fallback;
 
@@ -361,7 +370,7 @@ wrapper_AllocateMemory(VkDevice _device,
       result = wrapper_allocate_memory_ahardware_buffer(device,
          pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->ahardware_buffer);
    }
-
+   
    if (result != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to allocate memory, res %d", result);
       wrapper_device_memory_destroy(mem);
@@ -410,7 +419,7 @@ wrapper_MapMemory2KHR(VkDevice _device,
    if (pMemoryMapInfo->flags & VK_MEMORY_MAP_PLACED_BIT_EXT)
       placed_info = vk_find_struct_const(pMemoryMapInfo->pNext,
          MEMORY_MAP_PLACED_INFO_EXT);
-
+   
    mem = wrapper_device_memory_from_handle(device, pMemoryMapInfo->memory);
    if (!placed_info || !mem) {
       return device->dispatch_table.MapMemory(device->dispatch_handle,
