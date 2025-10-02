@@ -23,8 +23,10 @@ wsi_get_ahardware_buffer_blit_type(const struct wsi_device *wsi,
                AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
                AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
                AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN },
-                                &ahardware_buffer) != 0)
+                                &ahardware_buffer) != 0) {
+      WRAPPER_LOG(error, "Failed to allocate ahardware buffer, blitting");
       return WSI_SWAPCHAIN_IMAGE_BLIT;
+   }
 
    VkAndroidHardwareBufferFormatPropertiesANDROID ahardware_buffer_format_props = {
       .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,
@@ -39,8 +41,10 @@ wsi_get_ahardware_buffer_blit_type(const struct wsi_device *wsi,
 
    AHardwareBuffer_release(ahardware_buffer);
 
-   if (result != VK_SUCCESS)
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to get ahardware buffer properties, blitting");
       return WSI_SWAPCHAIN_IMAGE_BLIT;
+   }
 
    VkPhysicalDeviceExternalImageFormatInfo external_format_info = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
@@ -68,12 +72,16 @@ wsi_get_ahardware_buffer_blit_type(const struct wsi_device *wsi,
    };
    result = wsi->GetPhysicalDeviceImageFormatProperties2(
       wsi->pdevice, &format_info, &format_props);
-   if (result != VK_SUCCESS)
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "External Image format not supported, blitting");
       return WSI_SWAPCHAIN_IMAGE_BLIT;
+   }
 
    if (!(external_format_props.externalMemoryProperties.externalMemoryFeatures
-         & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT))
+         & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
+      WRAPPER_LOG(error, "External image format isn't importable, blitting");
       return WSI_SWAPCHAIN_IMAGE_BLIT;
+   }
 
    return WSI_SWAPCHAIN_NO_BLIT;
 }
@@ -100,12 +108,6 @@ wsi_create_ahardware_buffer_image_mem(const struct wsi_swapchain *chain,
    VkResult result;
 
    WRAPPER_LOG(info, "Creating ahardware buffer image mem");
-
-   if (AHardwareBuffer_allocate(info->ahardware_buffer_desc,
-                                &image->ahardware_buffer) != 0) {
-      WRAPPER_LOG(error, "Failed to allocate ahardware buffer");
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
-   }
 
    VkAndroidHardwareBufferFormatPropertiesANDROID ahardware_buffer_format_props = {
       .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,
@@ -183,12 +185,6 @@ wsi_create_ahardware_buffer_blit_context(const struct wsi_swapchain *chain,
    const VkExternalMemoryHandleTypeFlags handle_types =
       VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
 
-   if (AHardwareBuffer_allocate(info->ahardware_buffer_desc,
-                                &image->ahardware_buffer) != 0) {
-      WRAPPER_LOG(error, "Failed to allocate ahardware buffer");    
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
-   }
-
    VkAndroidHardwareBufferFormatPropertiesANDROID ahardware_buffer_format_props = {
       .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,
       .pNext = NULL,
@@ -253,14 +249,14 @@ wsi_create_ahardware_buffer_blit_context(const struct wsi_swapchain *chain,
          wsi_select_device_memory_type(
          wsi, ahardware_buffer_props.memoryTypeBits),
    };
-
+   
    result = wsi->AllocateMemory(chain->device, &blit_mem_info,
                                 &chain->alloc, &image->blit.memory);
    if (result != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to allocate blit memory, res %d", result);
       return result;
    }
-   
+
    result = wsi->BindImageMemory(chain->device, image->blit.image,
                                  image->blit.memory, 0);
    if (result != VK_SUCCESS) {
@@ -282,14 +278,14 @@ wsi_create_ahardware_buffer_blit_context(const struct wsi_swapchain *chain,
       .memoryTypeIndex =
          wsi_select_device_memory_type(wsi, reqs.memoryTypeBits),
    };
-
+   
    result = wsi->AllocateMemory(chain->device, &memory_info,
                                 &chain->alloc, &image->memory);
    if (result != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to allocate image memory, res %d", result);
       return result;
    }
-
+   
    image->num_planes = 1;
    image->drm_modifier = 1255;
 
@@ -323,7 +319,7 @@ wsi_configure_ahardware_buffer_image(const struct wsi_swapchain *chain,
       VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
    
    result = wsi_configure_image(chain, pCreateInfo,
-                                   blit ? 0 : handle_type, info);
+                                blit ? 0 : handle_type, info);
    if (result != VK_SUCCESS)
       return result;
    
@@ -401,7 +397,7 @@ wsi_configure_android_image(
 
    if ((result = wsi_configure_ahardware_buffer_image(chain, pCreateInfo, blit, info)) != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to configure ahardware buffer image, res %d", result);
-      return VK_SUCCESS;
+      return result;
    }
 
    if (blit) {

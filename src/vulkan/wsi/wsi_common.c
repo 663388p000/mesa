@@ -38,6 +38,7 @@
 #include "vk_sync.h"
 #include "vk_sync_dummy.h"
 #include "vk_util.h"
+#include "../wrapper/wrapper_log.h"
 
 #include <time.h>
 #include <stdlib.h>
@@ -118,7 +119,7 @@ wsi_device_init(struct wsi_device *wsi,
       .pNext = &pddp,
    };
    GetPhysicalDeviceProperties2(pdevice, &pdp2);
-
+   
    if (pddp.driverID == VK_DRIVER_ID_ARM_PROPRIETARY)
       wsi->needs_blit = true;
 
@@ -762,19 +763,34 @@ wsi_create_image(const struct wsi_swapchain *chain,
       image->explicit_sync[i].fd = -1;
 #endif
 
+#ifdef __TERMUX__
+   if (AHardwareBuffer_allocate(info->ahardware_buffer_desc,
+                                &image->ahardware_buffer) != 0) 
+   {
+      WRAPPER_LOG(error, "Failed to allocate ahardware buffer");
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+#endif
    result = wsi->CreateImage(chain->device, &info->create,
                              &chain->alloc, &image->image);
-   if (result != VK_SUCCESS)
+                  
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to create image, res %d", result);
       goto fail;
-
+   }
+   
    result = info->create_mem(chain, info, image);
-   if (result != VK_SUCCESS)
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to create image mem, res %d", result);
       goto fail;
-
+   }
+ 
    result = wsi->BindImageMemory(chain->device, image->image,
                                  image->memory, 0);
-   if (result != VK_SUCCESS)
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to bind image memory, res %d", result);
       goto fail;
+   }
 
    if (info->finish_create) {
       result = info->finish_create(chain, info, image);
