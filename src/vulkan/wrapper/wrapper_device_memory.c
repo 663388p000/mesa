@@ -303,14 +303,27 @@ wrapper_AllocateMemory(VkDevice _device,
       vk_error(device, result);
       goto out;
    }
-  
-   result = wrapper_allocate_memory_dmaheap(device,
-      pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
-
-   if (result != VK_SUCCESS) {
-      wrapper_device_memory_reset(mem);
+   
+   if (strstr(device->physical->resource_type, "ahb")) {
+      WRAPPER_LOG(info, "Using AHardwareBuffer memory backend");
       result = wrapper_allocate_memory_ahardware_buffer(device,
          pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->ahardware_buffer);
+   }
+   else if (strstr(device->physical->resource_type, "dmabuf")) {
+      WRAPPER_LOG(info, "Using DMABUF memory backend");
+      result = wrapper_allocate_memory_dmaheap(device,
+         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
+   }
+   else {
+      WRAPPER_LOG(info, "Using auto memory backend");
+      result = wrapper_allocate_memory_dmaheap(device,
+         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
+
+      if (result != VK_SUCCESS) {
+         wrapper_device_memory_reset(mem);
+         result = wrapper_allocate_memory_ahardware_buffer(device,
+            pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->ahardware_buffer);
+      }
    }
    
    if (result != VK_SUCCESS) {

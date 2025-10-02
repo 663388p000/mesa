@@ -216,6 +216,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       if (pdevice->dma_heap_fd < 0)
          pdevice->dma_heap_fd = open("/dev/ion", O_RDONLY);
 
+      char *wrapper_resource_type = getenv("WRAPPER_RESOURCE_TYPE");
+
+      pdevice->resource_type = wrapper_resource_type ? wrapper_resource_type : "auto";
+
       list_addtail(&pdevice->vk.link, &_instance->physical_devices.list);
    }
 

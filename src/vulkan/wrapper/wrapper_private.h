@@ -27,6 +27,7 @@ struct wrapper_physical_device {
    struct vk_physical_device vk;
 
    int dma_heap_fd;
+   char *resource_type;
    VkPhysicalDevice dispatch_handle;
    VkPhysicalDeviceProperties2 properties2;
    VkPhysicalDeviceDriverProperties driver_properties;
