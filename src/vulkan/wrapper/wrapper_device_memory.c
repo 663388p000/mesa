@@ -141,6 +141,54 @@ wrapper_allocate_memory_dmaheap(struct wrapper_device *device,
 }
 
 static VkResult
+wrapper_allocate_memory_opaque_fd(struct wrapper_device *device,
+								  const VkMemoryAllocateInfo *pAllocateInfo,
+								  const VkAllocationCallbacks *pAllocator,
+								  VkDeviceMemory *pMemory,
+								  int *out_fd)
+{
+   VkResult result;
+   VkMemoryAllocateInfo allocate_info;
+
+   VkExportMemoryAllocateInfo export_memory_info = {
+      .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+      .pNext = NULL,
+      .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+   };
+
+   allocate_info = *pAllocateInfo;
+   allocate_info.pNext = &export_memory_info;
+
+   result = device->dispatch_table.AllocateMemory(device->dispatch_handle,
+   												  &allocate_info,
+   												  pAllocator,
+   												  pMemory);
+
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to allocate opaque fd memory, res %d", result);
+      return result;
+   }
+
+   VkMemoryGetFdInfoKHR get_memory_fd = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
+      .pNext = NULL,
+      .memory = *pMemory,
+      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
+   };
+
+   result = device->dispatch_table.GetMemoryFdKHR(device->dispatch_handle,
+   							    &get_memory_fd,
+   							    out_fd);
+
+   if (result != VK_SUCCESS || *out_fd < 0) {
+      WRAPPER_LOG(error, "Failed to get opaque fd");
+      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+   }
+
+   return VK_SUCCESS;
+}
+
+static VkResult
 wrapper_allocate_memory_ahardware_buffer(struct wrapper_device *device,
                                          const VkMemoryAllocateInfo* pAllocateInfo,
                                          const VkAllocationCallbacks* pAllocator,
@@ -207,9 +255,9 @@ wrapper_device_memory_reset(struct wrapper_device_memory *mem) {
       AHardwareBuffer_release(mem->ahardware_buffer);
       mem->ahardware_buffer = NULL;
    }
-   if (mem->dmabuf_fd != -1) {
-      close(mem->dmabuf_fd);
-      mem->dmabuf_fd = -1;
+   if (mem->fd != -1) {
+      close(mem->fd);
+      mem->fd = -1;
    }
    if (mem->map_address && mem->map_size) {
       munmap(mem->map_address, mem->map_size);
@@ -233,7 +281,7 @@ wrapper_device_memory_create(struct wrapper_device *device,
    if (*out_mem == NULL)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-   (*out_mem)->dmabuf_fd = -1;
+   (*out_mem)->fd = -1;
    (*out_mem)->device = device;
    (*out_mem)->alloc = alloc ? alloc : &device->vk.alloc;
    list_add(&(*out_mem)->link, &device->device_memory_list);
@@ -312,17 +360,28 @@ wrapper_AllocateMemory(VkDevice _device,
    else if (strstr(device->physical->resource_type, "dmabuf")) {
       WRAPPER_LOG(info, "Using DMABUF memory backend");
       result = wrapper_allocate_memory_dmaheap(device,
-         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
+         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->fd);
+   }
+   else if (strstr(device->physical->resource_type, "opaque")) {
+      WRAPPER_LOG(info, "Using opaque fd memory backend");
+      result = wrapper_allocate_memory_opaque_fd(device,
+         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->fd);
    }
    else {
       WRAPPER_LOG(info, "Using auto memory backend");
       result = wrapper_allocate_memory_dmaheap(device,
-         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->dmabuf_fd);
+         pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->fd);
 
       if (result != VK_SUCCESS) {
          wrapper_device_memory_reset(mem);
          result = wrapper_allocate_memory_ahardware_buffer(device,
             pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->ahardware_buffer);
+      }
+
+      if (result != VK_SUCCESS) {
+         wrapper_device_memory_reset(mem);
+         result = wrapper_allocate_memory_opaque_fd(device,
+            pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->fd);
       }
    }
    
@@ -367,6 +426,7 @@ wrapper_MapMemory2KHR(VkDevice _device,
                       void** ppData)
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
+   VkResult result;
    const VkMemoryMapPlacedInfoEXT *placed_info = NULL;
    struct wrapper_device_memory *mem;
    int fd;
@@ -384,17 +444,18 @@ wrapper_MapMemory2KHR(VkDevice _device,
 
    WRAPPER_LOG(info, "Emulating vkMapMemory2KHR");
 
+   simple_mtx_lock(&device->resource_mutex);
+
    if (mem->map_address) {
       if (placed_info->pPlacedAddress != mem->map_address) {
          WRAPPER_LOG(error, "Placed address/mapped address mismatch");
-         return VK_ERROR_MEMORY_MAP_FAILED;
+         result = VK_ERROR_MEMORY_MAP_FAILED;
+         goto fail;
       } else {
-         *ppData = (char *)mem->map_address
-            + pMemoryMapInfo->offset;
-         return VK_SUCCESS;
+         goto out;
       }
    }
-   assert(mem->dmabuf_fd >= 0 || mem->ahardware_buffer != NULL);
+   assert(mem->fd >= 0 || mem->ahardware_buffer != NULL);
 
    if (mem->ahardware_buffer) {
       const native_handle_t *handle;
@@ -403,14 +464,15 @@ wrapper_MapMemory2KHR(VkDevice _device,
       fd = handle->data[0];
    }
    else {
-      fd = mem->dmabuf_fd;
+      fd = mem->fd;
    }
    
    if (pMemoryMapInfo->size == VK_WHOLE_SIZE) {
       int res = lseek(fd, 0, SEEK_END);
       if (res < 0) {
          WRAPPER_LOG(error, "Failed lseek for file descriptor %d", fd);
-         return VK_ERROR_MEMORY_MAP_FAILED;
+         result = VK_ERROR_MEMORY_MAP_FAILED;
+         goto fail;
       }
       mem->map_size = mem->alloc_size > 0 ?
          mem->alloc_size : res;
@@ -428,12 +490,17 @@ wrapper_MapMemory2KHR(VkDevice _device,
       WRAPPER_LOG(error, "mmap failed: error %d", errno);
       mem->map_address = NULL;
       mem->map_size = 0;
-      return vk_error(device, VK_ERROR_MEMORY_MAP_FAILED);
+      result = VK_ERROR_MEMORY_MAP_FAILED;
+      goto fail;
    }
 
-   *ppData = (char *)mem->map_address + pMemoryMapInfo->offset;
-
-   return VK_SUCCESS;
+   out:
+      simple_mtx_unlock(&device->resource_mutex);
+      *ppData = (char *)mem->map_address + pMemoryMapInfo->offset;
+      return VK_SUCCESS;
+   fail:
+      simple_mtx_unlock(&device->resource_mutex);
+      return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL

@@ -82,7 +82,7 @@ struct wrapper_device_memory {
    struct AHardwareBuffer *ahardware_buffer;
    struct wrapper_device *device;
    struct list_head link;
-   int dmabuf_fd;
+   int fd;
    void *map_address;
    size_t map_size;
    size_t alloc_size;
