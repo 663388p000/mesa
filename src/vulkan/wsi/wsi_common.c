@@ -119,9 +119,6 @@ wsi_device_init(struct wsi_device *wsi,
       .pNext = &pddp,
    };
    GetPhysicalDeviceProperties2(pdevice, &pdp2);
-   
-   if (pddp.driverID == VK_DRIVER_ID_ARM_PROPRIETARY)
-      wsi->needs_blit = true;
 
    wsi->maxImageDimension2D = pdp2.properties.limits.maxImageDimension2D;
    assert(pdp2.properties.limits.optimalBufferCopyRowPitchAlignment <= UINT32_MAX);
@@ -765,15 +762,16 @@ wsi_create_image(const struct wsi_swapchain *chain,
 
 #ifdef __TERMUX__
    if (AHardwareBuffer_allocate(info->ahardware_buffer_desc,
-                                &image->ahardware_buffer) != 0) 
+                                &image->ahardware_buffer) != 0)
    {
       WRAPPER_LOG(error, "Failed to allocate ahardware buffer");
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
 #endif
+
    result = wsi->CreateImage(chain->device, &info->create,
                              &chain->alloc, &image->image);
-                  
+             
    if (result != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to create image, res %d", result);
       goto fail;
