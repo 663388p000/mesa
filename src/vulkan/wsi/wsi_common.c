@@ -761,7 +761,7 @@ wsi_create_image(const struct wsi_swapchain *chain,
 #endif
 
 #ifdef __TERMUX__
-   if (AHardwareBuffer_allocate(info->ahardware_buffer_desc,
+   if (info->ahardware_buffer_desc && AHardwareBuffer_allocate(info->ahardware_buffer_desc,
                                 &image->ahardware_buffer) != 0)
    {
       WRAPPER_LOG(error, "Failed to allocate ahardware buffer");
