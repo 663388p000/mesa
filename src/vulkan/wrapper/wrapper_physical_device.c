@@ -562,4 +562,42 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    default:
       break;   
    }
-}                                      
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_GetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice,
+												VkSurfaceKHR surface,
+												uint32_t *pPresentModeCount,
+												VkPresentModeKHR *pPresentModes)
+{
+   VkPresentModeKHR presentMode;
+
+   WRAPPER_LOG(info, "Emulating GetPhysicalDeviceSurfacePresentModesKHR");
+
+   char *present_mode = getenv("WRAPPER_PRESENT_MODE");
+
+   if (!present_mode) {
+      presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+   } else {
+      WRAPPER_LOG(info, "Forcing present mode %s", present_mode);
+      if (!strcmp(present_mode, "mailbox"))
+         presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+      else if (!strcmp(present_mode, "fifo"))
+         presentMode = VK_PRESENT_MODE_FIFO_KHR;
+      else if (!strcmp(present_mode, "immediate"))
+         presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+      else if (!strcmp(present_mode, "relaxed"))
+         presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+      else
+         presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+   }
+   
+   if (pPresentModes == NULL)
+      *pPresentModeCount = 1;
+   else {
+      *pPresentModeCount = 1;
+      pPresentModes[*pPresentModeCount - 1] = presentMode;
+   }
+   
+   return VK_SUCCESS;
+}											
