@@ -81,6 +81,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
    VkPhysicalDevice physical_devices[16];
    uint32_t physical_device_count = 16;
    static int wrapper_disable_placed = -1;
+   static int wrapper_dmaheap_cached = -1;
    VkResult result;
 
    result = instance->dispatch_table.EnumeratePhysicalDevices(
@@ -212,7 +213,14 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          pdevice->vk.supported_extensions.EXT_robustness2 = true;
       }
 
-      pdevice->dma_heap_fd = open("/dev/dma_heap/system", O_RDONLY);
+      if (wrapper_dmaheap_cached == -1)
+         wrapper_dmaheap_cached = getenv("WRAPPER_DMAHEAP_CACHED") && atoi(getenv("WRAPPER_DMAHEAP_CACHED"));
+
+      if (wrapper_dmaheap_cached)
+         pdevice->dma_heap_fd = open("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);
+      else
+         pdevice->dma_heap_fd = open("/dev/dma_heap/system-uncached", O_RDONLY | O_CLOEXEC);
+         
       if (pdevice->dma_heap_fd < 0)
          pdevice->dma_heap_fd = open("/dev/ion", O_RDONLY);
 
