@@ -31,18 +31,26 @@ static char *get_executable_name() {
    return path;
 }
 
+static int is_log_enabled() {
+   if (WRAPPER_LOG_LEVEL(info) || WRAPPER_LOG_LEVEL(error))
+      return 1;
+
+   return 0;
+}
+
 void init_wrapper_logging()
 {
+   char date[256];
+   
    if (!wrapper_log_level) {
       wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
       if (!wrapper_log_level)
          wrapper_log_level = "none";
    }
-
-   char date[256];                                                                   
+                                                                 
    get_formatted_date_time(date, 256);
 
-   if (!wrapper_log_file && (WRAPPER_LOG_LEVEL(info) || WRAPPER_LOG_LEVEL(error))) {
+   if (!wrapper_log_file && is_log_enabled()) {
       char *wrapper_log_filename;
 
       wrapper_log_filename = getenv("WRAPPER_LOG_FILE");
@@ -85,7 +93,7 @@ void  stop_wrapper_logging()
 }
 
 void dump_shader_code(const uint32_t *code, size_t size) {
-   char *file; 
+   char *file; 	
    static int index = 0;
    
    asprintf(&file, "%s/%s_shader_%d.spv", WRAPPER_SHADER_LOG_PATH, get_executable_name(), index); 
