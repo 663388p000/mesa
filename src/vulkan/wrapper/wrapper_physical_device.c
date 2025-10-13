@@ -572,6 +572,42 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    }
 }
 
+VKAPI_ATTR void VKAPI_CALL
+wrapper_GetPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
+										  VkPhysicalDeviceMemoryProperties *pMemoryProperties)
+{
+   VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
+
+   static int wrapper_vmem_max_size = -1;
+   
+   pdevice->dispatch_table.GetPhysicalDeviceMemoryProperties(
+      pdevice->dispatch_handle, pMemoryProperties);
+
+   if (wrapper_vmem_max_size == -1)
+      wrapper_vmem_max_size = getenv("WRAPPER_VMEM_MAX_SIZE") ? atoi(getenv("WRAPPER_VMEM_MAX_SIZE")) : -1;
+
+   if (wrapper_vmem_max_size > 0)
+      pMemoryProperties->memoryHeaps[0].size = (VkDeviceSize)wrapper_vmem_max_size * 1048576;   
+}
+
+VKAPI_ATTR void VKAPI_CALL                                                                                      
+wrapper_GetPhysicalDeviceMemoryProperties2(VkPhysicalDevice physicalDevice,
+                                           VkPhysicalDeviceMemoryProperties2 *pMemoryProperties)
+{
+   VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
+
+   static int wrapper_vmem_max_size = -1;
+
+   pdevice->dispatch_table.GetPhysicalDeviceMemoryProperties2(
+      pdevice->dispatch_handle, pMemoryProperties);
+
+   if (wrapper_vmem_max_size == -1)
+      wrapper_vmem_max_size = getenv("WRAPPER_VMEM_MAX_SIZE") ? atoi(getenv("WRAPPER_VMEM_MAX_SIZE")) : -1;
+
+   if (wrapper_vmem_max_size > 0)
+      pMemoryProperties->memoryProperties.memoryHeaps[0].size = (VkDeviceSize)wrapper_vmem_max_size * 1048576;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 wrapper_GetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice,
 												VkSurfaceKHR surface,
@@ -609,3 +645,4 @@ wrapper_GetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice,
    
    return VK_SUCCESS;
 }											
+
