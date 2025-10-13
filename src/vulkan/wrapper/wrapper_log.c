@@ -25,6 +25,12 @@ static char *get_executable_name() {
 
    if (fd != -1) {
       read(fd, path, PATH_MAX_SIZE);
+      char *ptr = strrchr(path, '/');
+      if (ptr)
+         path = ptr + 1;
+      ptr = strrchr(path, '\\');
+      if (ptr)
+         path = ptr + 1;
       close(fd);
    }
    
@@ -55,9 +61,8 @@ void init_wrapper_logging()
 
       wrapper_log_filename = getenv("WRAPPER_LOG_FILE");
 
-      if (!wrapper_log_filename) {
+      if (!wrapper_log_filename)
          asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
-      }
 
       if (!strcmp("stdout", wrapper_log_filename)) {
          wrapper_log_file = stdout;
@@ -65,21 +70,13 @@ void init_wrapper_logging()
       else {
          wrapper_log_file = fopen(wrapper_log_filename, "w");
       }
-      
-      if (!wrapper_log_file) {
-         WRAPPER_LOG(error, "Failed to open wrapper log file %s", wrapper_log_filename);
-      }
    }
 
    if (!vvl_log_file && WRAPPER_LOG_LEVEL(validation)) {
       char *vvl_log_filename;
       
       asprintf(&vvl_log_filename, "%s/%s_%s", WRAPPER_VALIDATION_LOG_PATH, get_executable_name(), date);
-
       vvl_log_file = fopen(vvl_log_filename, "w");
-      if (!vvl_log_file) {
-         WRAPPER_LOG(error, "Failed to open vvl log file %s", vvl_log_filename);
-      }
    }
 }
 

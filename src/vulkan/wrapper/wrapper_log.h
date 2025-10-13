@@ -3,6 +3,7 @@
 
 #include <unistd.h>
 #include <libgen.h>
+#include <string.h>
 #include <stdlib.h>
 #include <vulkan/vulkan.h>
 
