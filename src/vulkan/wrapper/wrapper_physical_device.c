@@ -97,6 +97,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
    uint32_t physical_device_count = 16;
    static int wrapper_disable_placed = -1;
    static int wrapper_dmaheap_cached = -1;
+   static int wrapper_disable_present_wait = -1;
    VkResult result;
 
    result = instance->dispatch_table.EnumeratePhysicalDevices(
@@ -142,6 +143,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 	  if (wrapper_disable_placed == -1)
           wrapper_disable_placed = getenv("WRAPPER_DISABLE_PLACED") ? atoi(getenv("WRAPPER_DISABLE_PLACED")) : 0;
 
+      if (wrapper_disable_present_wait == -1)
+         wrapper_disable_present_wait = getenv("WRAPPER_DISABLE_PRESENT_WAIT") && atoi(getenv("WRAPPER_DISABLE_PRESENT_WAIT"));
+
       wrapper_setup_device_extensions(pdevice);
       wrapper_apply_device_extension_blacklist(pdevice);
       wrapper_setup_device_features(pdevice);
@@ -168,7 +172,13 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       supported_features->fillModeNonSolid = true;
       supported_features->shaderClipDistance = true;
       supported_features->shaderCullDistance = true;
-      supported_features->presentWait = supported_features->timelineSemaphore;
+      if (wrapper_disable_present_wait) {
+         WRAPPER_LOG(info, "Disabling present wait");
+         supported_features->presentWait = false;
+         pdevice->vk.supported_extensions.KHR_present_wait = false;
+      } else {
+         supported_features->presentWait = supported_features->timelineSemaphore;
+      }
       supported_features->swapchainMaintenance1 = true;
       supported_features->imageCompressionControlSwapchain = false;
       
