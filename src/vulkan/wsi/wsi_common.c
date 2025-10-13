@@ -1372,8 +1372,6 @@ static VkResult wsi_signal_present_id_timeline(struct wsi_swapchain *swapchain,
                                                VkQueue queue, uint64_t present_id,
                                                VkFence present_fence)
 {
-   assert(swapchain->present_id_timeline || present_fence);
-
    const VkTimelineSemaphoreSubmitInfo timeline_info = {
       .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
       .pSignalSemaphoreValues = &present_id,
@@ -1382,9 +1380,9 @@ static VkResult wsi_signal_present_id_timeline(struct wsi_swapchain *swapchain,
 
    const VkSubmitInfo submit_info = {
       .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-      .pNext = &timeline_info,
-      .signalSemaphoreCount = 1,
-      .pSignalSemaphores = &swapchain->present_id_timeline,
+      .pNext = (swapchain->present_id_timeline) ? NULL : &timeline_info,
+      .signalSemaphoreCount = (swapchain->present_id_timeline) ? 1 : 0,
+      .pSignalSemaphores = (swapchain->present_id_timeline) ? NULL : &swapchain->present_id_timeline,
    };
 
    uint32_t submit_count = present_id ? 1 : 0;
