@@ -12,7 +12,8 @@ wsi_get_android_blit_type(const struct wsi_device *wsi,
                       const struct wsi_base_image_params *params,
                                    VkDevice device)
 {
-   if (wsi->needs_blit)
+   int wrapper_blit = getenv("WRAPPER_BLIT") && atoi(getenv("WRAPPER_BLIT"));
+   if (wsi->needs_blit || wrapper_blit)
       return WSI_SWAPCHAIN_IMAGE_BLIT;
 
    return WSI_SWAPCHAIN_NO_BLIT;
