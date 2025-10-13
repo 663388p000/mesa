@@ -13,9 +13,6 @@ extern FILE *wrapper_log_file;
 void
 init_wrapper_logging(void);
 
-void
-stop_wrapper_logging(void);
-
 void                                                                         
 dump_shader_code(const uint32_t *code, size_t size);
 

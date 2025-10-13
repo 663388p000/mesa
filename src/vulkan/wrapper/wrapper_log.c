@@ -80,15 +80,6 @@ void init_wrapper_logging()
    }
 }
 
-void  stop_wrapper_logging()
-{
-   if (vvl_log_file)
-      fclose(vvl_log_file);
-
-   if (wrapper_log_file)
-      fclose(wrapper_log_file);
-}
-
 void dump_shader_code(const uint32_t *code, size_t size) {
    char *file; 	
    static int index = 0;

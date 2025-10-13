@@ -355,8 +355,6 @@ wrapper_DestroyInstance(VkInstance _instance,
 
    if (destroy_debug_utils_messenger)
       destroy_debug_utils_messenger(instance->dispatch_handle, debugUtilsMessenger, pAllocator);
-
-   stop_wrapper_logging();
       
    instance->dispatch_table.DestroyInstance(instance->dispatch_handle,
                                             pAllocator);
