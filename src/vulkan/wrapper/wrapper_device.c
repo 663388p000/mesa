@@ -104,6 +104,12 @@ static void process_pnext_chain(VkDeviceCreateInfo *create_info, struct wrapper_
 
    while (current != NULL) {
       switch(current->sType) {
+          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT: {
+             VkPhysicalDeviceTransformFeedbackFeaturesEXT *transform_features =
+                (VkPhysicalDeviceTransformFeedbackFeaturesEXT *)current;
+             transform_features->geometryStreams &= pdevice->base_supported_features.geometryStreams;
+             break;
+          }
           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
              if (pdevice->base_supported_extensions.EXT_robustness2)
                 break;
