@@ -208,9 +208,13 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          }
       }
 
-      if (strstr(engine_name, "DXVK") && pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
-         WRAPPER_LOG(info, "Forcing VK_EXT_robustness2");
-         pdevice->vk.supported_extensions.EXT_robustness2 = true;
+      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
+         if (strstr(engine_name, "DXVK")) {
+            WRAPPER_LOG(info, "Forcing VK_EXT_robustness2");
+            pdevice->vk.supported_extensions.EXT_robustness2 = true;
+         }
+         WRAPPER_LOG(info, "Disabling VK_EXT_calibrated_timestamps");
+         pdevice->vk.supported_extensions.EXT_calibrated_timestamps = false;
       }
 
       if (wrapper_dmaheap_cached == -1)
