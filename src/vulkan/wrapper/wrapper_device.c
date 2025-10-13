@@ -88,7 +88,17 @@ wrapper_append_required_extensions(const struct vk_device *device,
 #undef REQUIRED_EXTENSION
 }
 
-static void unlink_unsupported_struct(VkDeviceCreateInfo *create_info, struct wrapper_physical_device *pdevice) {
+static void unlink_vk_struct(VkDeviceCreateInfo *create_info, const VkBaseInStructure **current, VkBaseInStructure **prev) {
+   if (!*prev) 
+      create_info->pNext = (*current)->pNext;
+   else
+      (*prev)->pNext = (*current)->pNext;                                                
+
+   *current = (*current)->pNext;
+}
+
+static void process_pnext_chain(VkDeviceCreateInfo *create_info, struct wrapper_physical_device *pdevice) {
+   const uint32_t api_version = pdevice->properties2.properties.apiVersion;
    const VkBaseInStructure *current = (VkBaseInStructure *)create_info->pNext;
    VkBaseInStructure *prev = NULL;
 
@@ -98,14 +108,25 @@ static void unlink_unsupported_struct(VkDeviceCreateInfo *create_info, struct wr
              if (pdevice->base_supported_extensions.EXT_robustness2)
                 break;
              WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceRobustness2FeaturesEXT from vkDeviceCreateInfo pNext chain");
-             if (!prev) {
-                create_info->pNext = current->pNext;
-                current = current->pNext;
-             }
-             else {
-             	prev->pNext = current->pNext;
-             	current = current->pNext;
-             }
+             unlink_vk_struct(create_info, &current, &prev);
+             continue;
+          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+             if (api_version >= VK_MAKE_VERSION(1, 1, 0))
+                break;
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan11Features from vkDeviceCreateInfo pNext chain");
+             unlink_vk_struct(create_info, &current, &prev);
+             continue;
+          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+             if (api_version >= VK_MAKE_VERSION(1, 2, 0))
+                break;
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan12Features from vkDeviceCreateInfo pNext chain");
+             unlink_vk_struct(create_info, &current, &prev);
+             continue;
+          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
+             if (api_version >= VK_MAKE_VERSION(1, 3, 0))
+                break;
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan13Features from vkDeviceCreateInfo pNext chain");
+             unlink_vk_struct(create_info, &current, &prev);
              continue;
           default:
              break;
@@ -271,7 +292,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
             physical_device->base_supported_features.shaderCullDistance;
    }
 
-   unlink_unsupported_struct(&wrapper_create_info, device->physical);
+   process_pnext_chain(&wrapper_create_info, device->physical);
 
    if (WRAPPER_LOG_LEVEL(info)) {
       for (int i = 0; i < wrapper_enable_extension_count; i++) {

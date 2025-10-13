@@ -13,6 +13,21 @@
 #include "wsi_common.h"
 #include "util/os_misc.h"
 
+static uint32_t
+parse_vk_version_from_env()
+{
+   uint32_t apiVersion = 0, major = 0, minor = 0, patch = 0;
+
+   const char *wrapper_vk_version = getenv("WRAPPER_VK_VERSION");
+
+   if (wrapper_vk_version) {
+      sscanf(wrapper_vk_version, "%d.%d.%d", &major, &minor, &patch);
+      apiVersion = VK_MAKE_VERSION(major, minor, patch);
+   }
+
+   return apiVersion;
+}
+
 static VkResult
 wrapper_setup_device_extensions(struct wrapper_physical_device *pdevice) {
    struct vk_device_extension_table *exts = &pdevice->vk.supported_extensions;
@@ -278,14 +293,17 @@ wrapper_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
                                     VkPhysicalDeviceProperties *pProperties)
 {
    char *device_name;
+   uint32_t api_version = parse_vk_version_from_env();
    
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    pdevice->dispatch_table.GetPhysicalDeviceProperties(
       pdevice->dispatch_handle, pProperties);
 
    asprintf(&device_name, "Wrapper(%s)", pProperties->deviceName);
-
    strcpy(pProperties->deviceName, device_name);
+
+   if (api_version > 0)
+      pProperties->apiVersion = api_version;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -294,14 +312,17 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
 {
    char *device_name;
    char *driver_info;
+   uint32_t api_version = parse_vk_version_from_env();
    
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    pdevice->dispatch_table.GetPhysicalDeviceProperties2(
       pdevice->dispatch_handle, pProperties);
 
    asprintf(&device_name, "Wrapper(%s)", pProperties->properties.deviceName);
-   
    strcpy(pProperties->properties.deviceName, device_name);
+
+   if (api_version > 0)
+      pProperties->properties.apiVersion = api_version;
 
    vk_foreach_struct(prop, pProperties->pNext) {
       switch (prop->sType) {
