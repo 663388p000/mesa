@@ -202,6 +202,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
       const char *engine_name = instance->vk.app_info.engine_name
          ? instance->vk.app_info.engine_name : "wrapper";
+      pdevice->wsi_device.engine_name = engine_name;
 
       const uint32_t engine_version = instance->vk.app_info.engine_version;
 

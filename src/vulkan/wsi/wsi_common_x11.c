@@ -2468,6 +2468,31 @@ x11_get_min_image_count_for_present_mode(struct wsi_device *wsi_device,
       return min_image_count;
 }
 
+static void
+x11_set_string_property(xcb_connection_t *conn,
+						xcb_window_t window,
+						const char *name, 
+						const char *value)
+{
+   xcb_intern_atom_cookie_t atom_cookie;
+   xcb_intern_atom_reply_t *atom_reply;
+
+   atom_cookie = xcb_intern_atom(conn, 0, strlen(name), name);
+   atom_reply = xcb_intern_atom_reply(conn, atom_cookie, NULL);
+
+   if (atom_reply) {
+      xcb_change_property(conn,
+         XCB_PROP_MODE_REPLACE,
+         window,
+         atom_reply->atom,
+         XCB_ATOM_STRING,
+         8,
+         strlen(value),
+         value);
+      xcb_flush(conn);
+   }
+}
+
 /**
  * Create the swapchain.
  *
@@ -2759,6 +2784,10 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
                      x11_manage_event_queue, chain);
    if (ret != thrd_success)
       goto fail_init_event_queue;
+
+   x11_set_string_property(conn, window, "_MESA_DRV", "0");
+   x11_set_string_property(conn, window, "_MESA_DRV_ENGINE_NAME", wsi_device->engine_name);
+   x11_set_string_property(conn, window, "_MESA_DRV_GPU_NAME", wsi_device->properties2.properties.deviceName);
 
    *swapchain_out = &chain->base;
 

@@ -105,6 +105,8 @@ struct wsi_device {
 
    VkPhysicalDevice pdevice;
    VkPhysicalDeviceMemoryProperties memory_props;
+   VkPhysicalDeviceProperties2 properties2;
+   
    uint32_t queue_family_count;
    uint64_t queue_supports_blit;
 
@@ -286,6 +288,8 @@ struct wsi_device {
 #undef WSI_CB
 
     struct wsi_interface *                  wsi[VK_ICD_WSI_PLATFORM_MAX];
+
+    const char *engine_name;
 };
 
 typedef PFN_vkVoidFunction (VKAPI_PTR *WSI_FN_GetPhysicalDeviceProcAddr)(VkPhysicalDevice physicalDevice, const char* pName);

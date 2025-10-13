@@ -114,16 +114,16 @@ wsi_device_init(struct wsi_device *wsi,
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
       .pNext = &wsi->pci_bus_info,
    };
-   VkPhysicalDeviceProperties2 pdp2 = {
+   wsi->properties2 = (VkPhysicalDeviceProperties2) {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
       .pNext = &pddp,
    };
-   GetPhysicalDeviceProperties2(pdevice, &pdp2);
+   GetPhysicalDeviceProperties2(pdevice, &wsi->properties2);
 
-   wsi->maxImageDimension2D = pdp2.properties.limits.maxImageDimension2D;
-   assert(pdp2.properties.limits.optimalBufferCopyRowPitchAlignment <= UINT32_MAX);
+   wsi->maxImageDimension2D = wsi->properties2.properties.limits.maxImageDimension2D;
+   assert(wsi->properties2.properties.limits.optimalBufferCopyRowPitchAlignment <= UINT32_MAX);
    wsi->optimalBufferCopyRowPitchAlignment =
-      pdp2.properties.limits.optimalBufferCopyRowPitchAlignment;
+      wsi->properties2.properties.limits.optimalBufferCopyRowPitchAlignment;
    wsi->override_present_mode = VK_PRESENT_MODE_MAX_ENUM_KHR;
 
    GetPhysicalDeviceMemoryProperties(pdevice, &wsi->memory_props);
