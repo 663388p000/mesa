@@ -27,7 +27,10 @@ wsi_create_ahardware_buffer_image_mem(const struct wsi_swapchain *chain,
    const struct wsi_device *wsi = chain->wsi;
    VkResult result;
 
-   WRAPPER_LOG(info, "Creating ahardware buffer image mem");
+   WRAPPER_LOG(info, "Allocating memory for %dx%d image with format %d, usage %d, flags %d",
+      info->create.extent.width, info->create.extent.height, 
+      info->create.format, info->create.usage, 
+      info->create.flags);
   
    const VkMemoryDedicatedAllocateInfo memory_dedicated_info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
@@ -69,7 +72,10 @@ wsi_create_ahardware_buffer_blit_context(const struct wsi_swapchain *chain,
    const struct wsi_device *wsi = chain->wsi;
    VkResult result;
 
-   WRAPPER_LOG(info, "Creating ahardware buffer blit context");
+   WRAPPER_LOG(info, "Creating blit context for %dx%d image with format %d, usage %d, flags %d",
+      info->create.extent.width, info->create.extent.height,
+      info->create.format, info->create.usage,
+      info->create.flags);
    
    const VkExternalMemoryHandleTypeFlags handle_types =
       VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;

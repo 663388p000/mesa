@@ -347,6 +347,23 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    return VK_SUCCESS;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_CreateImage(VkDevice _device,
+					const VkImageCreateInfo *pCreateInfo,
+					const VkAllocationCallbacks *pAllocator,
+					VkImage *pImage)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+
+   WRAPPER_LOG(info, "Creating %dx%d image with format %d, usage %d, flags %d",
+      pCreateInfo->extent.width, pCreateInfo->extent.height,
+      pCreateInfo->format, pCreateInfo->usage,
+      pCreateInfo->flags);
+
+   return device->dispatch_table.CreateImage(device->dispatch_handle,
+      pCreateInfo, pAllocator, pImage);
+}
+
 VKAPI_ATTR void VKAPI_CALL
 wrapper_GetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex,
                        uint32_t queueIndex, VkQueue* pQueue) {
