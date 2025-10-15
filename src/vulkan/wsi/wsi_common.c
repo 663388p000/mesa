@@ -119,6 +119,9 @@ wsi_device_init(struct wsi_device *wsi,
       .pNext = &pddp,
    };
    GetPhysicalDeviceProperties2(pdevice, &wsi->properties2);
+   
+   if (pddp.driverID == VK_DRIVER_ID_ARM_PROPRIETARY)
+      wsi->needs_blit = true;
 
    wsi->maxImageDimension2D = wsi->properties2.properties.limits.maxImageDimension2D;
    assert(wsi->properties2.properties.limits.optimalBufferCopyRowPitchAlignment <= UINT32_MAX);
@@ -768,10 +771,9 @@ wsi_create_image(const struct wsi_swapchain *chain,
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
 #endif
-
    result = wsi->CreateImage(chain->device, &info->create,
                              &chain->alloc, &image->image);
-             
+                  
    if (result != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to create image, res %d", result);
       goto fail;

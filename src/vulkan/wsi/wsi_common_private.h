@@ -90,8 +90,6 @@ struct wsi_image_info {
    VkImageDrmFormatModifierListCreateInfoEXT drm_mod_list;
 #ifdef __TERMUX__
    struct AHardwareBuffer_Desc *ahardware_buffer_desc;
-   VkAndroidHardwareBufferFormatPropertiesANDROID ahardware_buffer_format_props;
-   VkAndroidHardwareBufferPropertiesANDROID ahardware_buffer_props;
 #endif
 
    enum wsi_image_type image_type;
