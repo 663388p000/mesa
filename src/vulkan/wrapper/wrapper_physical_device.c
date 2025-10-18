@@ -241,6 +241,8 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             WRAPPER_LOG(info, "Disabling VK_EXT_extended_dynamic_state and VK_EXT_extended_dynamic_state2");
             pdevice->vk.supported_extensions.EXT_extended_dynamic_state = false;
             pdevice->vk.supported_extensions.EXT_extended_dynamic_state2 = false;
+            WRAPPER_LOG(info, "Faking dualSrcBlend feature");
+            supported_features->dualSrcBlend = true;
          }
          WRAPPER_LOG(info, "Disabling VK_EXT_calibrated_timestamps");
          pdevice->vk.supported_extensions.EXT_calibrated_timestamps = false;

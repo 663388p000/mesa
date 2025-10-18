@@ -258,6 +258,7 @@ if (pdf2 && pdf2->features.f) { \
    DISABLE_FEATURE(fillModeNonSolid);
    DISABLE_FEATURE(shaderClipDistance);
    DISABLE_FEATURE(shaderCullDistance);
+   DISABLE_FEATURE(dualSrcBlend);
 
 #undef CHECK_FEATURE
 
