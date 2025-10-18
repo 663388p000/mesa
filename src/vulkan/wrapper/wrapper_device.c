@@ -242,62 +242,24 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    pdf2 = __vk_find_struct((void *)pCreateInfo->pNext,
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
             
-   if (pdf && pdf->textureCompressionBC) {
-      pdf->textureCompressionBC &= 
-          physical_device->base_supported_features.textureCompressionBC;
-   }
-   if (pdf2 && pdf2->features.textureCompressionBC) {
-      pdf2->features.textureCompressionBC &=
-          physical_device->base_supported_features.textureCompressionBC;
-   }
-   if (pdf && pdf->multiViewport) {
-         pdf->multiViewport &=
-            physical_device->base_supported_features.multiViewport;
-   }
-   if (pdf2 && pdf2->features.multiViewport) {
-         pdf2->features.multiViewport &=
-            physical_device->base_supported_features.multiViewport;
-   }
-   if (pdf && pdf->depthClamp) {
-        pdf->depthClamp &=
-            physical_device->base_supported_features.depthClamp;
-   }
-   if (pdf2 && pdf2->features.depthClamp) {
-        pdf2->features.depthClamp &=
-            physical_device->base_supported_features.depthClamp;
-   }
-   if (pdf && pdf->depthBiasClamp) {
-       pdf->depthBiasClamp &=
-            physical_device->base_supported_features.depthBiasClamp;
-   }
-   if (pdf2 && pdf2->features.depthBiasClamp) {
-       pdf2->features.depthBiasClamp &=
-            physical_device->base_supported_features.depthBiasClamp;
-   }
-    if (pdf && pdf->fillModeNonSolid) {
-       pdf->fillModeNonSolid &=
-            physical_device->base_supported_features.fillModeNonSolid;
-   }
-   if (pdf2 && pdf2->features.fillModeNonSolid) {
-       pdf2->features.fillModeNonSolid &=
-            physical_device->base_supported_features.fillModeNonSolid;
-   }
-    if (pdf && pdf->shaderClipDistance) {
-       pdf->shaderClipDistance &=
-            physical_device->base_supported_features.shaderClipDistance;
-   }
-   if (pdf2 && pdf2->features.shaderClipDistance) {
-       pdf2->features.shaderClipDistance &=
-            physical_device->base_supported_features.shaderClipDistance;
-   }
-   if (pdf && pdf->shaderCullDistance) {
-       pdf->shaderCullDistance &=
-            physical_device->base_supported_features.shaderCullDistance;
-   }
-   if (pdf2 && pdf2->features.shaderCullDistance) {
-       pdf2->features.shaderCullDistance &=
-            physical_device->base_supported_features.shaderCullDistance;
-   }
+#define DISABLE_FEATURE(f) \
+if (pdf && pdf->f) { \
+   pdf->f &= physical_device->base_supported_features.f; \
+} \
+\
+if (pdf2 && pdf2->features.f) { \
+   pdf2->features.f &= physical_device->base_supported_features.f; \
+}
+
+   DISABLE_FEATURE(textureCompressionBC);
+   DISABLE_FEATURE(multiViewport);
+   DISABLE_FEATURE(depthClamp);
+   DISABLE_FEATURE(depthBiasClamp);
+   DISABLE_FEATURE(fillModeNonSolid);
+   DISABLE_FEATURE(shaderClipDistance);
+   DISABLE_FEATURE(shaderCullDistance);
+
+#undef CHECK_FEATURE
 
    process_pnext_chain(&wrapper_create_info, device->physical);
 
@@ -485,12 +447,16 @@ wrapper_CreateShaderModule(VkDevice _device,
 
    VkShaderModuleCreateInfo create_info = *pCreateInfo;
 
+   simple_mtx_lock(&device->resource_mutex);
+
    if (device->physical->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
       uint32_t *code = malloc(create_info.codeSize);
       memcpy(code, create_info.pCode, create_info.codeSize);
       patch_OpSelect_for_unbound_textures(code, create_info.codeSize);
       create_info.pCode = code;
    }
+
+   simple_mtx_unlock(&device->resource_mutex);
 
    if (WRAPPER_LOG_LEVEL(shader))
       dump_shader_code(create_info.pCode, create_info.codeSize);
