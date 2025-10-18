@@ -216,27 +216,27 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
       const uint32_t engine_version = instance->vk.app_info.engine_version;
 
-      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY &&
-          pdevice->properties2.properties.driverVersion > VK_MAKE_VERSION(512, 744, 0) &&
-          strstr(app_name, "clvk")) {
-         /* HACK: Fixed clvk not working on qualcomm proprietary driver. */
-         supported_features->globalPriorityQuery = false;
-      }
-
-      /* HACK: make newer dxvk work on Qualcomm proprietary drivers */
+      /* HACK: Specific prop drivers workarounds for Adreno and Mali GPUs */
       
-      if (strstr(engine_name, "DXVK") && pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
-         WRAPPER_LOG(info, "Disabling VK_EXT_line_rasterization");
-         pdevice->vk.supported_extensions.EXT_line_rasterization = false;	
-         if (engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
-            WRAPPER_LOG(info, "Forcing VK_KHR_pipeline_library");
-            pdevice->vk.supported_extensions.KHR_pipeline_library = true;
+      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
+         if (strstr(engine_name, "DXVK")) {
+            WRAPPER_LOG(info, "Disabling VK_EXT_line_rasterization");
+            pdevice->vk.supported_extensions.EXT_line_rasterization = false;	
+            if (engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
+               WRAPPER_LOG(info, "Faking VK_KHR_pipeline_library");
+               pdevice->vk.supported_extensions.KHR_pipeline_library = true;
+            }
+         }
+         if (pdevice->properties2.properties.driverVersion > VK_MAKE_VERSION(512, 744, 0) &&
+             strstr(app_name, "clvk")) {
+            WRAPPER_LOG(info, "Disabling globalPriorityQueue feature");
+            supported_features->globalPriorityQuery = false;    
          }
       }
 
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
          if (strstr(engine_name, "DXVK")) {
-            WRAPPER_LOG(info, "Forcing VK_EXT_robustness2");
+            WRAPPER_LOG(info, "Faking VK_EXT_robustness2");
             pdevice->vk.supported_extensions.EXT_robustness2 = true;
             WRAPPER_LOG(info, "Disabling VK_EXT_extended_dynamic_state and VK_EXT_extended_dynamic_state2");
             pdevice->vk.supported_extensions.EXT_extended_dynamic_state = false;
