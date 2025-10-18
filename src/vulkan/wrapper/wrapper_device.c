@@ -2,6 +2,7 @@
 
 #include "wrapper_private.h"
 #include "wrapper_log.h"
+#include "spirv_patcher.hpp"
 #include "wrapper_entrypoints.h"
 #include "wrapper_trampolines.h"
 #include "vk_alloc.h"
@@ -481,12 +482,21 @@ wrapper_CreateShaderModule(VkDevice _device,
 						   VkShaderModule *pShaderModule)
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
-   
+
+   VkShaderModuleCreateInfo create_info = *pCreateInfo;
+
+   if (device->physical->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
+      uint32_t *code = malloc(create_info.codeSize);
+      memcpy(code, create_info.pCode, create_info.codeSize);
+      patch_OpSelect_for_unbound_textures(code, create_info.codeSize);
+      create_info.pCode = code;
+   }
+
    if (WRAPPER_LOG_LEVEL(shader))
-      dump_shader_code(pCreateInfo->pCode, pCreateInfo->codeSize);
+      dump_shader_code(create_info.pCode, create_info.codeSize);
    
    return device->dispatch_table.CreateShaderModule(
-      device->dispatch_handle, pCreateInfo, pAllocator, pShaderModule);
+      device->dispatch_handle, &create_info, pAllocator, pShaderModule);
 }						   						   
 
 static VkResult
