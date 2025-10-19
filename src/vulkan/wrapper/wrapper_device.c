@@ -453,7 +453,7 @@ wrapper_CreateShaderModule(VkDevice _device,
    if (device->physical->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
       uint32_t *code = malloc(create_info.codeSize);
       memcpy(code, create_info.pCode, create_info.codeSize);
-      patch_OpSelect_for_unbound_textures(code, create_info.codeSize);
+      patch_OpConstantComposite_to_OpSpecConstantComposite(code, create_info.codeSize);
       create_info.pCode = code;
    }
 

@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 void
-patch_OpSelect_for_unbound_textures(uint32_t *pCode, uint32_t codeSize);
+patch_OpConstantComposite_to_OpSpecConstantComposite(uint32_t *pCode, uint32_t codeSize);
 
 #ifdef __cplusplus
 }
