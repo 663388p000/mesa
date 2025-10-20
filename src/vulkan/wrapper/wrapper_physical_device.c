@@ -13,6 +13,8 @@
 #include "wsi_common.h"
 #include "util/os_misc.h"
 
+static int wrapper_fake_bcn_properties = 0;
+
 static uint32_t
 parse_vk_version_from_env()
 {
@@ -227,7 +229,12 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
                pdevice->vk.supported_extensions.KHR_pipeline_library = true;
             }
          }
-         if (pdevice->properties2.properties.driverVersion > VK_MAKE_VERSION(512, 744, 0) &&
+
+         uint32_t driver_version = pdevice->properties2.properties.driverVersion;
+         if (driver_version >= VK_MAKE_VERSION(512, 530, 0)) 
+            wrapper_fake_bcn_properties = (pdevice->base_supported_features.textureCompressionBC) ? 0 : 1;
+         
+         if (driver_version > VK_MAKE_VERSION(512, 744, 0) &&
              strstr(app_name, "clvk")) {
             WRAPPER_LOG(info, "Disabling globalPriorityQueue feature");
             supported_features->globalPriorityQuery = false;    
@@ -385,6 +392,7 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
       {
          VkPhysicalDeviceVulkan12Properties *vk12_prop =
               (VkPhysicalDeviceVulkan12Properties *)prop;
+              
          vk12_prop->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
          vk12_prop->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
          vk12_prop->shaderDenormFlushToZeroFloat16 = false;
@@ -393,7 +401,7 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
          vk12_prop->shaderRoundingModeRTEFloat32 = false;
          vk12_prop->shaderSignedZeroInfNanPreserveFloat16 = false;
          vk12_prop->shaderSignedZeroInfNanPreserveFloat32 = false;
- 
+         
          asprintf(&driver_info, "%d.%d.%d", 
             VK_VERSION_MAJOR(pProperties->properties.driverVersion),
             VK_VERSION_MINOR(pProperties->properties.driverVersion),
@@ -434,12 +442,8 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
 	                                           VkImageCreateFlags flags,
 	                                           VkImageFormatProperties *pImageFormatProperties)
 {
-   VkResult result;
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
-
-   result = pdevice->dispatch_table.GetPhysicalDeviceImageFormatProperties(
-      pdevice->dispatch_handle, format, type, tiling, usage, flags, pImageFormatProperties);
-      
+  
    switch(format) {
    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:                                    
    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
@@ -456,6 +460,9 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
+      if (!wrapper_fake_bcn_properties)
+         break;
+      
       if (type & VK_IMAGE_TYPE_1D) {
          pImageFormatProperties->maxExtent.width = pdevice->properties2.properties.limits.maxImageDimension1D;
          pImageFormatProperties->maxExtent.height = 1;
@@ -498,8 +505,9 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
    default:
       break;
    }
-
-   return result;   
+  
+   return pdevice->dispatch_table.GetPhysicalDeviceImageFormatProperties(pdevice->dispatch_handle, 
+      format, type, tiling, usage, flags, pImageFormatProperties);  
 }	                                           
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -507,12 +515,8 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
                                                 const VkPhysicalDeviceImageFormatInfo2* pImageFormatInfo,
                                                 VkImageFormatProperties2* pImageFormatProperties)
 {
-   VkResult result;
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
-   
-   result = pdevice->dispatch_table.GetPhysicalDeviceImageFormatProperties2(
-      pdevice->dispatch_handle, pImageFormatInfo, pImageFormatProperties);
-
+  
    switch(pImageFormatInfo->format) {
    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:                                    
    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
@@ -529,6 +533,9 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
+      if (!wrapper_fake_bcn_properties)
+         break;
+      
       if (pImageFormatInfo->type & VK_IMAGE_TYPE_1D) {
          pImageFormatProperties->imageFormatProperties.maxExtent.width = pdevice->properties2.properties.limits.maxImageDimension1D;
          pImageFormatProperties->imageFormatProperties.maxExtent.height = 1;
@@ -573,8 +580,9 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    default:
       break;
    }
-
-   return result;
+  
+   return pdevice->dispatch_table.GetPhysicalDeviceImageFormatProperties2(pdevice->dispatch_handle, 
+      pImageFormatInfo, pImageFormatProperties);
 }                                                
 
 VKAPI_ATTR void VKAPI_CALL
@@ -583,9 +591,7 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
                                             VkFormatProperties* pFormatProperties)
 {
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
-   pdevice->dispatch_table.GetPhysicalDeviceFormatProperties(
-      pdevice->dispatch_handle, format, pFormatProperties);
-      
+   
    switch (format) {
    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
    case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
@@ -603,11 +609,17 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      pFormatProperties->optimalTilingFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+      if (wrapper_fake_bcn_properties) {
+         pFormatProperties->optimalTilingFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+         return;
+      }
       break;
    default:
       break;   
    }
+   
+   pdevice->dispatch_table.GetPhysicalDeviceFormatProperties(pdevice->dispatch_handle, 
+      format, pFormatProperties);  
 }
 
 VKAPI_ATTR void VKAPI_CALL
