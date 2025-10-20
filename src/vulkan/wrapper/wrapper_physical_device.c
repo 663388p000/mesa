@@ -239,6 +239,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             WRAPPER_LOG(info, "Disabling globalPriorityQueue feature");
             supported_features->globalPriorityQuery = false;    
          }
+
+         WRAPPER_LOG(info, "Disabling VK_KHR_shader_float_controls");
+         pdevice->vk.supported_extensions.KHR_shader_float_controls = false;
       }
 
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
@@ -347,6 +350,8 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
    if (api_version > 0)
       pProperties->properties.apiVersion = api_version;
 
+   uint32_t driver_id = pdevice->driver_properties.driverID;
+
    vk_foreach_struct(prop, pProperties->pNext) {
       switch (prop->sType) {
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_PROPERTIES_EXT:
@@ -368,8 +373,12 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR:
       {
+         if (driver_id != VK_DRIVER_ID_QUALCOMM_PROPRIETARY)
+            break;
+            
          VkPhysicalDeviceFloatControlsPropertiesKHR *float_prop =
               (VkPhysicalDeviceFloatControlsPropertiesKHR *)prop;
+         
          float_prop->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
          float_prop->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;     
          float_prop->shaderDenormFlushToZeroFloat16 = false;
@@ -392,15 +401,17 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
       {
          VkPhysicalDeviceVulkan12Properties *vk12_prop =
               (VkPhysicalDeviceVulkan12Properties *)prop;
-              
-         vk12_prop->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
-         vk12_prop->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
-         vk12_prop->shaderDenormFlushToZeroFloat16 = false;
-         vk12_prop->shaderDenormFlushToZeroFloat32 = false;
-         vk12_prop->shaderRoundingModeRTEFloat16 = false;
-         vk12_prop->shaderRoundingModeRTEFloat32 = false;
-         vk12_prop->shaderSignedZeroInfNanPreserveFloat16 = false;
-         vk12_prop->shaderSignedZeroInfNanPreserveFloat32 = false;
+
+         if (driver_id == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
+            vk12_prop->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+            vk12_prop->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
+            vk12_prop->shaderDenormFlushToZeroFloat16 = false;
+            vk12_prop->shaderDenormFlushToZeroFloat32 = false;
+            vk12_prop->shaderRoundingModeRTEFloat16 = false;
+            vk12_prop->shaderRoundingModeRTEFloat32 = false;
+            vk12_prop->shaderSignedZeroInfNanPreserveFloat16 = false;
+            vk12_prop->shaderSignedZeroInfNanPreserveFloat32 = false;
+         }
          
          asprintf(&driver_info, "%d.%d.%d", 
             VK_VERSION_MAJOR(pProperties->properties.driverVersion),
