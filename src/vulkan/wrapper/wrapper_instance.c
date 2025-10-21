@@ -318,6 +318,16 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
          if (!strcmp(layer_props[i].layerName, layers[0])) {
             wrapper_create_info.enabledLayerCount = 1;
             wrapper_create_info.ppEnabledLayerNames = layers;
+            const VkBool32 settings_validate_best_practices_arm = VK_TRUE;
+            const VkLayerSettingEXT layer_settings[] = {
+               {layers[0], "validate_best_practices_arm", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &settings_validate_best_practices_arm},
+               {layers[0], "validate_best_practices", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &settings_validate_best_practices_arm}
+            };
+            VkLayerSettingsCreateInfoEXT layer_settings_info = {
+               VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT, NULL, 2, layer_settings,
+            };
+            layer_settings_info.pNext = wrapper_create_info.pNext;
+            wrapper_create_info.pNext = &layer_settings_info;
          }
       }
    }
