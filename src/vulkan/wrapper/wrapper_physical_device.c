@@ -244,6 +244,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          pdevice->vk.supported_extensions.KHR_shader_float_controls = false;
       }
 
+      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY) {
+         wrapper_fake_bcn_properties = 1;
+      }
+
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
          if (strstr(engine_name, "DXVK")) {
             WRAPPER_LOG(info, "Faking VK_EXT_robustness2");
@@ -473,6 +477,11 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC7_SRGB_BLOCK:
       if (!wrapper_fake_bcn_properties)
          break;
+
+      if (wrapper_fake_bcn_properties && 
+          pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
+          format > 138)
+         break;
       
       if (type & VK_IMAGE_TYPE_1D) {
          pImageFormatProperties->maxExtent.width = pdevice->properties2.properties.limits.maxImageDimension1D;
@@ -545,6 +554,11 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
       if (!wrapper_fake_bcn_properties)
+         break;
+
+      if (wrapper_fake_bcn_properties &&
+          pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
+          pImageFormatInfo->format > 138)
          break;
       
       if (pImageFormatInfo->type & VK_IMAGE_TYPE_1D) {
@@ -621,6 +635,10 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
       if (wrapper_fake_bcn_properties) {
+         if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
+             format > 138)
+            break;
+            
          pFormatProperties->optimalTilingFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
          return;
       }
