@@ -453,6 +453,7 @@ wrapper_CreateShaderModule(VkDevice _device,
       uint32_t *code = malloc(create_info.codeSize);
       memcpy(code, create_info.pCode, create_info.codeSize);
       patch_OpConstantComposite_to_OpSpecConstantComposite(code, create_info.codeSize);
+      remove_ClipDistance(code, &create_info.codeSize);
       create_info.pCode = code;
    }
 
