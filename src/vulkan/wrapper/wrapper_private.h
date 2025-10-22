@@ -4,6 +4,7 @@
 #include "vulkan/runtime/vk_queue.h"
 #include "vulkan/runtime/vk_command_buffer.h"
 #include "vulkan/runtime/vk_log.h"
+#include "vulkan/runtime/vk_buffer.h"
 #include "vulkan/util/vk_dispatch_table.h"
 #include "vulkan/wsi/wsi_common.h"
 #include "util/simple_mtx.h"
@@ -59,12 +60,23 @@ struct wrapper_device {
    simple_mtx_t resource_mutex;
    struct list_head command_buffer_list;
    struct list_head device_memory_list;
+   struct list_head buffer_list;
    struct wrapper_physical_device *physical;
    struct vk_device_dispatch_table dispatch_table;
 };
 
 VK_DEFINE_HANDLE_CASTS(wrapper_device, vk.base, VkDevice,
                        VK_OBJECT_TYPE_DEVICE)
+
+struct wrapper_buffer {
+   struct vk_buffer vk;
+
+   struct wrapper_device *device;
+   struct list_head link;
+   VkBuffer dispatch_handle;
+   VkDeviceSize size;
+   VkDeviceMemory memory;
+};
 
 struct wrapper_command_buffer {
    struct vk_command_buffer vk;
@@ -89,6 +101,9 @@ struct wrapper_device_memory {
    VkDeviceMemory dispatch_handle;
    const VkAllocationCallbacks *alloc;
 };
+
+struct wrapper_buffer *
+get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer);
 
 VkResult enumerate_physical_device(struct vk_instance *_instance);
 void destroy_physical_device(struct vk_physical_device *pdevice);

@@ -36,6 +36,17 @@ const struct vk_device_extension_table wrapper_filter_extensions =
    .EXT_image_compression_control_swapchain = true,
 };
 
+struct wrapper_buffer *
+get_wrapper_buffer_from_handle(struct wrapper_device * device, VkBuffer buffer) {
+   list_for_each_entry_safe(struct wrapper_buffer, wb,
+      &device->buffer_list, link) {
+      if (wb->dispatch_handle == buffer)
+         return wb;
+   }
+
+   return NULL;
+}
+
 static void
 wrapper_filter_enabled_extensions(const struct wrapper_device *device,
                                   uint32_t *enable_extension_count,
@@ -209,6 +220,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
 
    list_inithead(&device->command_buffer_list);
    list_inithead(&device->device_memory_list);
+   list_inithead(&device->buffer_list);
    simple_mtx_init(&device->resource_mutex, mtx_plain);
    device->physical = physical_device;
 
@@ -308,6 +320,96 @@ if (pdf2 && pdf2->features.f) { \
    *pDevice = wrapper_device_to_handle(device);
 
    return VK_SUCCESS;
+}
+
+static void 
+wrapper_buffer_destroy(struct wrapper_device *device,
+					   struct wrapper_buffer *wb,
+					   const VkAllocationCallbacks *pAllocator)
+{
+   device->dispatch_table.DestroyBuffer(device->dispatch_handle,
+      wb->dispatch_handle, pAllocator);
+   
+   list_del(&wb->link);
+   vk_object_free(&wb->device->vk, &wb->device->vk.alloc, wb);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_CreateBuffer(VkDevice _device,
+					 const VkBufferCreateInfo *pCreateInfo,
+					 const VkAllocationCallbacks *pAllocator,
+					 VkBuffer *pBuffer)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+   VkResult res;
+
+   struct wrapper_buffer *wb = vk_object_zalloc(&device->vk, 
+      &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
+
+   if (!wb) {
+      WRAPPER_LOG(error, "Failed to allocate wrapper_buffer");
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+
+   res = device->dispatch_table.CreateBuffer(device->dispatch_handle,
+      pCreateInfo, pAllocator, pBuffer);
+
+   if (res != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to create buffer, res %d", res);
+      return res;
+   }
+      
+   wb->device = device;
+   wb->size = pCreateInfo->size;
+   wb->dispatch_handle = *pBuffer;
+
+   list_add(&wb->link, &device->buffer_list);
+
+   return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_BindBufferMemory(VkDevice _device,
+						 VkBuffer buffer,
+						 VkDeviceMemory memory,
+						 VkDeviceSize memoryOffset)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+   VkResult res;
+
+   struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
+
+   if (wb == NULL) {
+      WRAPPER_LOG(error, "Failed to query wrapper_buffer");
+      return VK_ERROR_INITIALIZATION_FAILED;
+   }
+
+   res = device->dispatch_table.BindBufferMemory(device->dispatch_handle,
+      buffer, memory, memoryOffset);
+
+   if (res != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to bind buffer memory, res %d", res);
+      return res;
+   }
+
+   wb->memory = memory;
+
+   return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL
+wrapper_DestroyBuffer(VkDevice _device,
+					  VkBuffer buffer,
+					  const VkAllocationCallbacks *pAllocator)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+
+   struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
+
+   if (wb == NULL)
+      return;
+
+   wrapper_buffer_destroy(device, wb, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -599,6 +701,10 @@ wrapper_DestroyDevice(VkDevice _device, const VkAllocationCallbacks* pAllocator)
    list_for_each_entry_safe(struct wrapper_device_memory, mem,
                             &device->device_memory_list, link) {
       wrapper_device_memory_destroy(mem);
+   }
+   list_for_each_entry_safe(struct wrapper_buffer, wb,
+                            &device->buffer_list, link) {
+      wrapper_buffer_destroy(device, wb, pAllocator);
    }
 
    simple_mtx_unlock(&device->resource_mutex);
