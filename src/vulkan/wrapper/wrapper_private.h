@@ -2,6 +2,7 @@
 #include "vulkan/runtime/vk_physical_device.h"
 #include "vulkan/runtime/vk_device.h"
 #include "vulkan/runtime/vk_queue.h"
+#include "vulkan/runtime/vk_image.h"
 #include "vulkan/runtime/vk_command_buffer.h"
 #include "vulkan/runtime/vk_log.h"
 #include "vulkan/runtime/vk_buffer.h"
@@ -61,6 +62,7 @@ struct wrapper_device {
    struct list_head command_buffer_list;
    struct list_head device_memory_list;
    struct list_head buffer_list;
+   struct list_head image_list;
    struct wrapper_physical_device *physical;
    struct vk_device_dispatch_table dispatch_table;
 };
@@ -76,6 +78,15 @@ struct wrapper_buffer {
    VkBuffer dispatch_handle;
    VkDeviceSize size;
    VkDeviceMemory memory;
+};
+
+struct wrapper_image {
+   struct vk_image vk;
+
+   struct wrapper_device *device;
+   struct list_head link;
+   VkImage dispatch_handle;
+   VkFormat format;
 };
 
 struct wrapper_command_buffer {
@@ -104,6 +115,9 @@ struct wrapper_device_memory {
 
 struct wrapper_buffer *
 get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer);
+
+struct wrapper_image *
+get_wrapper_image_from_handle(struct wrapper_device *device, VkImage image);
 
 VkResult enumerate_physical_device(struct vk_instance *_instance);
 void destroy_physical_device(struct vk_physical_device *pdevice);

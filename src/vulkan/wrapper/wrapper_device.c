@@ -37,7 +37,7 @@ const struct vk_device_extension_table wrapper_filter_extensions =
 };
 
 struct wrapper_buffer *
-get_wrapper_buffer_from_handle(struct wrapper_device * device, VkBuffer buffer) {
+get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer) {
    list_for_each_entry_safe(struct wrapper_buffer, wb,
       &device->buffer_list, link) {
       if (wb->dispatch_handle == buffer)
@@ -45,6 +45,17 @@ get_wrapper_buffer_from_handle(struct wrapper_device * device, VkBuffer buffer) 
    }
 
    return NULL;
+}
+
+struct wrapper_image *
+get_wrapper_image_from_handle(struct wrapper_device *device, VkImage image) {
+   list_for_each_entry_safe(struct wrapper_image, wi,
+      &device->image_list, link) {
+      if (wi->dispatch_handle == image)
+            return wi;
+      }
+   
+      return NULL;
 }
 
 static void
@@ -221,6 +232,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    list_inithead(&device->command_buffer_list);
    list_inithead(&device->device_memory_list);
    list_inithead(&device->buffer_list);
+   list_inithead(&device->image_list);
    simple_mtx_init(&device->resource_mutex, mtx_plain);
    device->physical = physical_device;
 
@@ -412,6 +424,18 @@ wrapper_DestroyBuffer(VkDevice _device,
    wrapper_buffer_destroy(device, wb, pAllocator);
 }
 
+static void 
+wrapper_image_destroy(struct wrapper_device *device,
+					  struct wrapper_image *wi,
+					  const VkAllocationCallbacks *pAllocator)
+{
+   device->dispatch_table.DestroyImage(device->dispatch_handle,
+      wi->dispatch_handle, pAllocator);
+   
+   list_del(&wi->link);
+   vk_object_free(&device->vk, &device->vk.alloc, wi);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 wrapper_CreateImage(VkDevice _device,
 					const VkImageCreateInfo *pCreateInfo,
@@ -419,14 +443,46 @@ wrapper_CreateImage(VkDevice _device,
 					VkImage *pImage)
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
+   VkResult res;
 
-   WRAPPER_LOG(info, "Creating %dx%d image with format %d, usage %d, flags %d",
-      pCreateInfo->extent.width, pCreateInfo->extent.height,
-      pCreateInfo->format, pCreateInfo->usage,
-      pCreateInfo->flags);
+   struct wrapper_image *wi = vk_object_zalloc(&device->vk,
+      &device->vk.alloc, sizeof(struct wrapper_image), VK_OBJECT_TYPE_IMAGE);
 
-   return device->dispatch_table.CreateImage(device->dispatch_handle,
+   if (!wi) {
+      WRAPPER_LOG(error, "Failed to allocate wrapper_image");
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+
+   res = device->dispatch_table.CreateImage(device->dispatch_handle,
       pCreateInfo, pAllocator, pImage);
+
+   if (res != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to create image, res %d", res);
+      return res;
+   }
+
+   wi->device = device;
+   wi->format = pCreateInfo->format;
+   wi->dispatch_handle = *pImage;
+
+   list_add(&wi->link, &device->image_list);
+
+   return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL
+wrapper_DestroyImage(VkDevice _device,
+					 VkImage image,
+					 const VkAllocationCallbacks *pAllocator)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+
+   struct wrapper_image *wi = get_wrapper_image_from_handle(device, image);
+
+   if (wi == NULL)
+      return;
+
+   wrapper_image_destroy(device, wi, pAllocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -705,6 +761,10 @@ wrapper_DestroyDevice(VkDevice _device, const VkAllocationCallbacks* pAllocator)
    list_for_each_entry_safe(struct wrapper_buffer, wb,
                             &device->buffer_list, link) {
       wrapper_buffer_destroy(device, wb, pAllocator);
+   }
+   list_for_each_entry_safe(struct wrapper_image, wi,
+                            &device->image_list, link) {
+      wrapper_image_destroy(device, wi, pAllocator);
    }
 
    simple_mtx_unlock(&device->resource_mutex);
