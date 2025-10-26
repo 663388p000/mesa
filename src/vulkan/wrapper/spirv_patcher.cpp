@@ -1,4 +1,5 @@
 #include <vector>
+#include <map>
 
 #include "spirv_patcher.hpp"
 #include "wrapper_log.h"
@@ -27,38 +28,43 @@ void
 remove_ClipDistance(uint32_t *pCode, size_t *codeSize)
 {
    uint32_t offset = 5;
-   std::vector<uint32_t> patched_code(pCode, pCode + (*codeSize / sizeof(uint32_t)));
+   std::vector<uint32_t> code(pCode, pCode + (*codeSize / sizeof(uint32_t)));
+   std::map<uint32_t, uint32_t> instructions;
 
-   while (offset < *codeSize) {
-      uint32_t instruction = pCode[offset];
+   while (offset < code.size()) {
+      uint32_t instruction = code[offset];
       uint32_t length = instruction >> 16;
       uint32_t opcode = instruction & 0xffffu;
 
-      if (length == 0 || offset + length > *codeSize)
+      if (length == 0 || offset + length > code.size())
          break;
 
       if (opcode == OpCode::OpCapability) {
-         uint32_t capability = pCode[offset + 1];
+         uint32_t capability = code[offset + 1];
          if (capability == Capability::ClipDistance) {
-            WRAPPER_LOG(info, "Removing OpCapability ClipDistance");
-            patched_code.erase(patched_code.begin() + offset, patched_code.begin() + offset + length);
+            instructions.insert({offset, length});
          }
       }
 
       if (opcode == OpCode::OpDecorate) {
-         uint32_t decoration = pCode[offset + 2];
-         uint32_t literal = pCode[offset + 3];
-         if (decoration == Decoration::Builtin && literal == Decoration::Literals::ClipDistance) {
-            WRAPPER_LOG(info, "Removing OpDecorate ClipDistance");
-            patched_code.erase(patched_code.begin() + offset, patched_code.begin() + offset + length - 1);
+         uint32_t decoration = code[offset + 2];
+         if (decoration == Decoration::Builtin) {
+            uint32_t literal = code[offset + 3];
+            if (literal == Decoration::Literals::ClipDistance) {
+               instructions.insert({offset, length});
+            }
          }
       }
       
       offset += length;
    }
+ 
+   for (auto it = instructions.rbegin(); it != instructions.rend(); it++) {
+      code.erase(code.begin() + it->first, code.begin() + it->first + it->second);
+   }
    
-   *codeSize = sizeof(uint32_t) * patched_code.size();
-   memcpy(pCode, patched_code.data(), *codeSize);
+   *codeSize = sizeof(uint32_t) * code.size();
+   memcpy(pCode, code.data(), *codeSize);
 }
 
 void 
