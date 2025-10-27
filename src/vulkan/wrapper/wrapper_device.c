@@ -2,6 +2,7 @@
 
 #include "wrapper_private.h"
 #include "wrapper_log.h"
+#include "wrapper_bcdec.h"
 #include "spirv_patcher.hpp"
 #include "wrapper_entrypoints.h"
 #include "wrapper_trampolines.h"
@@ -110,7 +111,7 @@ wrapper_append_required_extensions(const struct vk_device *device,
 #undef REQUIRED_EXTENSION
 }
 
-static void unlink_vk_struct(VkDeviceCreateInfo *create_info, const VkBaseInStructure **current, VkBaseInStructure **prev) {
+static void unlink_vk_struct(VkBaseInStructure *create_info, const VkBaseInStructure **current, VkBaseInStructure **prev) {
    if (!*prev) 
       create_info->pNext = (*current)->pNext;
    else
@@ -119,7 +120,7 @@ static void unlink_vk_struct(VkDeviceCreateInfo *create_info, const VkBaseInStru
    *current = (*current)->pNext;
 }
 
-static void process_pnext_chain(VkDeviceCreateInfo *create_info, struct wrapper_physical_device *pdevice) {
+static void process_pnext_chain(VkBaseInStructure *create_info, struct wrapper_physical_device *pdevice) {
    const uint32_t api_version = pdevice->properties2.properties.apiVersion;
    const VkBaseInStructure *current = (VkBaseInStructure *)create_info->pNext;
    VkBaseInStructure *prev = NULL;
@@ -135,25 +136,25 @@ static void process_pnext_chain(VkDeviceCreateInfo *create_info, struct wrapper_
           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
              if (pdevice->base_supported_extensions.EXT_robustness2)
                 break;
-             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceRobustness2FeaturesEXT from vkDeviceCreateInfo pNext chain");
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceRobustness2FeaturesEXT from pNext chain");
              unlink_vk_struct(create_info, &current, &prev);
              continue;
           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
              if (api_version >= VK_MAKE_VERSION(1, 1, 0))
                 break;
-             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan11Features from vkDeviceCreateInfo pNext chain");
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan11Features from pNext chain");
              unlink_vk_struct(create_info, &current, &prev);
              continue;
           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
              if (api_version >= VK_MAKE_VERSION(1, 2, 0))
                 break;
-             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan12Features from vkDeviceCreateInfo pNext chain");
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan12Features from pNext chain");
              unlink_vk_struct(create_info, &current, &prev);
              continue;
           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
              if (api_version >= VK_MAKE_VERSION(1, 3, 0))
                 break;
-             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan13Features from vkDeviceCreateInfo pNext chain");
+             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan13Features from pNext chain");
              unlink_vk_struct(create_info, &current, &prev);
              continue;
           default:
@@ -233,6 +234,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    list_inithead(&device->device_memory_list);
    list_inithead(&device->buffer_list);
    list_inithead(&device->image_list);
+   list_inithead(&device->staging_buffers_list);
    simple_mtx_init(&device->resource_mutex, mtx_plain);
    device->physical = physical_device;
 
@@ -285,7 +287,7 @@ if (pdf2 && pdf2->features.f) { \
 
 #undef CHECK_FEATURE
 
-   process_pnext_chain(&wrapper_create_info, device->physical);
+   process_pnext_chain((VkBaseInStructure *)&wrapper_create_info, device->physical);
 
    if (WRAPPER_LOG_LEVEL(info)) {
       for (int i = 0; i < wrapper_enable_extension_count; i++) {
@@ -339,11 +341,16 @@ wrapper_buffer_destroy(struct wrapper_device *device,
 					   struct wrapper_buffer *wb,
 					   const VkAllocationCallbacks *pAllocator)
 {
+   if (wb->mapped_address) {
+      device->dispatch_table.UnmapMemory(device->dispatch_handle,
+         wb->memory);
+   }
+   
    device->dispatch_table.DestroyBuffer(device->dispatch_handle,
       wb->dispatch_handle, pAllocator);
    
    list_del(&wb->link);
-   vk_object_free(&wb->device->vk, &wb->device->vk.alloc, wb);
+   vk_object_free(&device->vk, &device->vk.alloc, wb);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -405,6 +412,7 @@ wrapper_BindBufferMemory(VkDevice _device,
    }
 
    wb->memory = memory;
+   wb->offset = memoryOffset;
 
    return VK_SUCCESS;
 }
@@ -444,6 +452,7 @@ wrapper_CreateImage(VkDevice _device,
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
    VkResult res;
+   VkImageCreateInfo create_info = *pCreateInfo;
 
    struct wrapper_image *wi = vk_object_zalloc(&device->vk,
       &device->vk.alloc, sizeof(struct wrapper_image), VK_OBJECT_TYPE_IMAGE);
@@ -453,8 +462,15 @@ wrapper_CreateImage(VkDevice _device,
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
 
+   if (is_emulated_bcn(device->physical, pCreateInfo->format)) {
+      create_info.format = get_format_for_bcn(pCreateInfo->format);
+      if (create_info.flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT) {
+         create_info.flags &= ~VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+      }
+   }
+   
    res = device->dispatch_table.CreateImage(device->dispatch_handle,
-      pCreateInfo, pAllocator, pImage);
+      &create_info, pAllocator, pImage);
 
    if (res != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to create image, res %d", res);
@@ -462,12 +478,31 @@ wrapper_CreateImage(VkDevice _device,
    }
 
    wi->device = device;
-   wi->format = pCreateInfo->format;
+   wi->info = *pCreateInfo;
    wi->dispatch_handle = *pImage;
 
    list_add(&wi->link, &device->image_list);
 
    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_CreateImageView(VkDevice _device,
+						const VkImageViewCreateInfo *pCreateInfo,
+						const VkAllocationCallbacks *pAllocator,
+						VkImageView *pView)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+   VkImageViewCreateInfo create_info = *pCreateInfo;
+
+   struct wrapper_image *wi = get_wrapper_image_from_handle(device, pCreateInfo->image);
+
+   if (is_emulated_bcn(device->physical, wi->info.format)) {
+      create_info.format = get_format_for_bcn(pCreateInfo->format);
+   }
+
+   return device->dispatch_table.CreateImageView(device->dispatch_handle,
+     &create_info, pAllocator, pView);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -531,7 +566,9 @@ wrapper_QueueSubmit(VkQueue _queue, uint32_t submitCount,
       for (int j = 0; j < submit_info->commandBufferCount; j++) {
          VK_FROM_HANDLE(wrapper_command_buffer, wcb,
                         submit_info->pCommandBuffers[j]);
+         wcb->fence = fence;
          command_buffers[j] = wcb->dispatch_handle;
+         
       }
       wrapper_submits[i] = pSubmits[i];
       wrapper_submits[i].pCommandBuffers = command_buffers;
@@ -578,6 +615,42 @@ wrapper_QueueSubmit2(VkQueue _queue, uint32_t submitCount,
    return result;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_WaitForFences(VkDevice _device,
+					  uint32_t fenceCount,
+					  const VkFence *pFences,
+					  VkBool32 waitAll,
+					  uint64_t timeout)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+   VkResult res;
+
+   res = device->dispatch_table.WaitForFences(device->dispatch_handle,
+     fenceCount, pFences, waitAll, timeout);
+
+   if (res != VK_SUCCESS)
+      return res;
+
+   for (uint32_t i = 0; i < fenceCount; i++) {
+      VkFence fence = pFences[i];
+      VkResult result = device->dispatch_table.GetFenceStatus(device->dispatch_handle,
+         fence);
+      if (result != VK_SUCCESS)
+         continue;
+      list_for_each_entry_safe(struct wrapper_buffer, wb, 
+                               &device->staging_buffers_list, link)
+      {
+         if (wb->wcb->fence == fence) {
+            VkDeviceMemory memory = wb->memory;
+            wrapper_buffer_destroy(device, wb, NULL);
+            device->dispatch_table.FreeMemory(device->dispatch_handle,
+              memory, NULL);
+         }
+      }
+    }
+
+   return VK_SUCCESS;
+}
 
 VKAPI_ATTR void VKAPI_CALL
 wrapper_CmdExecuteCommands(VkCommandBuffer commandBuffer,
@@ -703,6 +776,151 @@ wrapper_AllocateCommandBuffers(VkDevice _device,
    return result;
 }
 
+VKAPI_ATTR void VKAPI_CALL
+wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
+							 VkBuffer srcBuffer,
+							 VkImage dstImage,
+							 VkImageLayout dstLayout,
+							 uint32_t regionCount,
+							 const VkBufferImageCopy *pRegions)
+{
+   VK_FROM_HANDLE(wrapper_command_buffer, wcb, commandBuffer);
+   VkResult res;
+
+   struct wrapper_device *device = wcb->device;
+   struct wrapper_image *wi = get_wrapper_image_from_handle(device, dstImage);
+   struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, srcBuffer);
+   VkFormat format = wi->info.format;
+   int texel_size = get_texel_size_for_format(get_format_for_bcn(format));
+
+   if (!wi || !wb || !is_emulated_bcn(device->physical, format)) {
+      device->dispatch_table.CmdCopyBufferToImage(wcb->dispatch_handle,
+         srcBuffer, dstImage, dstLayout, regionCount, pRegions);
+      return;
+   }
+
+   if (!wb->mapped_address) {
+      res = device->dispatch_table.MapMemory(device->dispatch_handle,
+         wb->memory, wb->offset, wb->size, 0, &wb->mapped_address);
+         
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to map source buffer memory, res %d", res);
+         return;
+      }
+  
+      VkMappedMemoryRange srcRanges = {
+         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+         .offset = wb->offset,
+         .size = wb->size,
+         .memory = wb->memory,
+      };
+  
+   
+      res = device->dispatch_table.InvalidateMappedMemoryRanges(device->dispatch_handle,
+         1, &srcRanges);
+
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to invalidate source buffer memory ranges, res %d", res);
+         return;
+      }
+   }
+   
+   for (int i = 0; i < regionCount; i++) {
+      VkBufferImageCopy copy_region = pRegions[i];
+      VkBuffer stagingBuffer;
+      VkDeviceMemory stagingBufferMemory;
+      void *dstData;
+      
+      int w = copy_region.imageExtent.width;
+      int h = copy_region.imageExtent.height;
+      int offset = copy_region.bufferOffset;
+
+      VkBufferCreateInfo buffer_create_info = {
+         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+         .size = w * h * texel_size,
+         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+         .flags = 0,
+         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      };
+
+      res = device->dispatch_table.CreateBuffer(device->dispatch_handle,
+         &buffer_create_info, NULL, &stagingBuffer);
+
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to create staging buffer, res %d", res);
+         return;
+      }
+
+      VkMemoryAllocateInfo allocate_info = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+         .allocationSize = w * h * texel_size,
+         .memoryTypeIndex = wrapper_select_device_memory_type(device,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT),
+      };
+
+      res = device->dispatch_table.AllocateMemory(device->dispatch_handle,
+         &allocate_info, NULL, &stagingBufferMemory);
+
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to allocate staging buffer memory, res %d", res);
+         return;
+      }
+
+      res = device->dispatch_table.BindBufferMemory(device->dispatch_handle,
+         stagingBuffer, stagingBufferMemory, 0);
+
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to bind staging buffer memory, res %d", res);
+         return;
+      }
+
+      res = device->dispatch_table.MapMemory(device->dispatch_handle,
+         stagingBufferMemory, 0, w * h * texel_size, 0, &dstData);
+
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to map staging buffer memory, res %d", res);
+         return;
+      }
+
+       WRAPPER_LOG(info, "Command Buffer %p Fence %p: Decompressing region %d of buffer %p from offset %d to %dx%d image %p of format %d using staging VkBuffer %p",
+         wcb->dispatch_handle, wcb->fence, i, wb->dispatch_handle, offset, w, h, wi->dispatch_handle, format, stagingBuffer);
+
+      decompress_bcn_format(wb->mapped_address, dstData, w, h, format, offset);
+
+      VkMappedMemoryRange dstRanges = {
+         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+         .offset = 0,
+         .size = w * h * texel_size,
+         .memory = stagingBufferMemory,
+      };
+
+      res = device->dispatch_table.FlushMappedMemoryRanges(device->dispatch_handle,
+         1, &dstRanges);
+
+      if (res != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed to flush staging buffer memory range, res %d", res);
+         return;
+      }
+
+      copy_region.bufferOffset = 0;
+      copy_region.bufferRowLength = 0;
+      copy_region.bufferImageHeight = 0;
+
+      device->dispatch_table.CmdCopyBufferToImage(wcb->dispatch_handle,
+         stagingBuffer, dstImage, dstLayout, 1, &copy_region);
+
+      struct wrapper_buffer *wb = vk_object_zalloc(&device->vk,
+         &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
+
+      wb->dispatch_handle = stagingBuffer;
+      wb->memory = stagingBufferMemory;
+      wb->mapped_address = dstData;
+      wb->wcb = wcb;
+      wb->device = device;
+
+      list_add(&wb->link, &device->staging_buffers_list);
+   }
+}
 
 VKAPI_ATTR void VKAPI_CALL
 wrapper_FreeCommandBuffers(VkDevice _device,

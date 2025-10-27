@@ -13,8 +13,6 @@
 #include "wsi_common.h"
 #include "util/os_misc.h"
 
-static int wrapper_fake_bcn_properties = 0;
-
 static uint32_t
 parse_vk_version_from_env()
 {
@@ -100,6 +98,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
    static int wrapper_disable_placed = -1;
    static int wrapper_dmaheap_cached = -1;
    static int wrapper_disable_present_wait = -1;
+   int wrapper_emulate_bcn;
    VkResult result;
 
    result = instance->dispatch_table.EnumeratePhysicalDevices(
@@ -217,6 +216,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       pdevice->wsi_device.engine_name = engine_name;
 
       const uint32_t engine_version = instance->vk.app_info.engine_version;
+      const uint32_t driver_version = pdevice->properties2.properties.driverVersion;
 
       /* HACK: Specific prop drivers workarounds for Adreno and Mali GPUs */
       
@@ -229,10 +229,6 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
                pdevice->vk.supported_extensions.KHR_pipeline_library = true;
             }
          }
-
-         uint32_t driver_version = pdevice->properties2.properties.driverVersion;
-         if (driver_version >= VK_MAKE_VERSION(512, 530, 0)) 
-            wrapper_fake_bcn_properties = (pdevice->base_supported_features.textureCompressionBC) ? 0 : 1;
          
          if (driver_version > VK_MAKE_VERSION(512, 744, 0) &&
              strstr(app_name, "clvk")) {
@@ -242,10 +238,6 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
          WRAPPER_LOG(info, "Disabling VK_KHR_shader_float_controls");
          pdevice->vk.supported_extensions.KHR_shader_float_controls = false;
-      }
-
-      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY) {
-         wrapper_fake_bcn_properties = 1;
       }
 
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
@@ -261,6 +253,22 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          WRAPPER_LOG(info, "Disabling VK_EXT_calibrated_timestamps");
          pdevice->vk.supported_extensions.EXT_calibrated_timestamps = false;
       }
+
+      char *wrapper_emulate_bcn_env = getenv("WRAPPER_EMULATE_BCN");
+
+      if (!wrapper_emulate_bcn_env) {
+         if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY &&
+             driver_version >= VK_MAKE_VERSION(512, 530, 0)) {
+            wrapper_emulate_bcn = (pdevice->base_supported_features.textureCompressionBC) ?
+               0 : 1;
+         } else {
+            wrapper_emulate_bcn = 3;
+         }
+      } else {
+         wrapper_emulate_bcn = atoi(wrapper_emulate_bcn_env);
+      }
+
+      pdevice->emulate_bcn = wrapper_emulate_bcn;
 
       if (wrapper_dmaheap_cached == -1)
          wrapper_dmaheap_cached = getenv("WRAPPER_DMAHEAP_CACHED") && atoi(getenv("WRAPPER_DMAHEAP_CACHED"));
@@ -460,6 +468,7 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
   
    switch(format) {
+   case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:                                    
    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
@@ -475,12 +484,11 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      if (!wrapper_fake_bcn_properties)
+      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
+          format <= 138 && pdevice->emulate_bcn == 3)
          break;
-
-      if (wrapper_fake_bcn_properties && 
-          pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
-          format > 138)
+             
+      if (pdevice->emulate_bcn < 1)
          break;
       
       if (type & VK_IMAGE_TYPE_1D) {
@@ -538,6 +546,7 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
   
    switch(pImageFormatInfo->format) {
+   case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
    case VK_FORMAT_BC1_RGB_SRGB_BLOCK:                                    
    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
@@ -553,12 +562,11 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      if (!wrapper_fake_bcn_properties)
+      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
+          pImageFormatInfo->format <= 138 && pdevice->emulate_bcn == 3)
          break;
-
-      if (wrapper_fake_bcn_properties &&
-          pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
-          pImageFormatInfo->format > 138)
+         
+      if (pdevice->emulate_bcn < 1)
          break;
       
       if (pImageFormatInfo->type & VK_IMAGE_TYPE_1D) {
@@ -618,8 +626,8 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    
    switch (format) {
-   case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
    case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+   case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
    case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
    case VK_FORMAT_BC2_UNORM_BLOCK:
@@ -634,11 +642,11 @@ wrapper_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC6H_SFLOAT_BLOCK:
    case VK_FORMAT_BC7_UNORM_BLOCK:
    case VK_FORMAT_BC7_SRGB_BLOCK:
-      if (wrapper_fake_bcn_properties) {
-         if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
-             format > 138)
-            break;
-            
+      if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
+          format <= 138 && pdevice->emulate_bcn == 3)
+         break;
+         
+      if (pdevice->emulate_bcn > 0) {
          pFormatProperties->optimalTilingFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
          return;
       }
