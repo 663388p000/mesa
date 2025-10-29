@@ -1,14 +1,20 @@
 #include "wrapper_log.h"
 
+#include <sys/stat.h>
+
 #define PATH_MAX_SIZE 1024
-#define WRAPPER_SHADER_LOG_PATH "/sdcard/wrapper/shaders"
-#define WRAPPER_LOG_PATH "/sdcard/wrapper/logs"
-#define WRAPPER_VALIDATION_LOG_PATH "/sdcard/wrapper/validation"
+#define WRAPPER_DIR "/sdcard/wrapper"
+#define WRAPPER_SHADER_LOG_PATH WRAPPER_DIR "/shaders"
+#define WRAPPER_LOG_PATH WRAPPER_DIR "/logs"
+#define WRAPPER_VALIDATION_LOG_PATH WRAPPER_DIR "/validation"
+
+#define CREATE_LOG_FOLDER(folder) \
+if (stat(folder, &sb) != 0 || !S_ISDIR(sb.st_mode)) \
+   	mkdir(folder, 770);
 
 char *wrapper_log_level;
 FILE *wrapper_log_file;
-
-static FILE *vvl_log_file;
+FILE *vvl_log_file;
 
 static void get_formatted_date_time(char *buf, size_t length) 
 {  
@@ -47,15 +53,18 @@ static int is_log_enabled() {
 void init_wrapper_logging()
 {
    char date[256];
+   struct stat sb;
    
-   if (!wrapper_log_level) {
+   if (!wrapper_log_level)
       wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
-      if (!wrapper_log_level)
-         wrapper_log_level = "none";
-   }
                                                                  
    get_formatted_date_time(date, 256);
 
+   CREATE_LOG_FOLDER(WRAPPER_DIR);
+   CREATE_LOG_FOLDER(WRAPPER_LOG_PATH);
+   CREATE_LOG_FOLDER(WRAPPER_SHADER_LOG_PATH);
+   CREATE_LOG_FOLDER(WRAPPER_VALIDATION_LOG_PATH);
+   
    if (!wrapper_log_file && is_log_enabled()) {
       char *wrapper_log_filename;
 
