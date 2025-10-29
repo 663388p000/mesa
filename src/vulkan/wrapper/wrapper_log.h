@@ -27,8 +27,10 @@ wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeve
 #define WRAPPER_LOG(level, fmt, ...) \
 do {\
    if (WRAPPER_LOG_LEVEL(level)) {\
-      fprintf(wrapper_log_file, "[%s]: " fmt "\n", #level, ##__VA_ARGS__);\
-      fflush(wrapper_log_file);\
+      if (wrapper_log_file) { \
+         fprintf(wrapper_log_file, "[%s]: " fmt "\n", #level, ##__VA_ARGS__);\
+         fflush(wrapper_log_file);\
+      } \
    }\
 } while (0)
 

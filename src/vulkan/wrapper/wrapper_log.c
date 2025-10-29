@@ -96,8 +96,10 @@ void dump_shader_code(const uint32_t *code, size_t size) {
    asprintf(&file, "%s/%s_shader_%d.spv", WRAPPER_SHADER_LOG_PATH, get_executable_name(), index); 
 
    FILE *fp = fopen(file, "wb"); 
-   fwrite(code, 1, size, fp); 
-   fclose(fp); 
+   if (fp) {
+      fwrite(code, 1, size, fp); 
+      fclose(fp); 
+   }
 
    index++;
 }
@@ -112,8 +114,10 @@ wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeve
    int32_t messageIdNumber = callbackData->messageIdNumber;
    const char* message = callbackData->pMessage;
 
-   fprintf(vvl_log_file, "[%s] Code %i : %s\n", messageIdName, messageIdNumber, message);
-   fflush(vvl_log_file);
+   if (vvl_log_file) {
+      fprintf(vvl_log_file, "[%s] Code %i : %s\n", messageIdName, messageIdNumber, message);
+      fflush(vvl_log_file);
+   }
 
    return 0;
 }
