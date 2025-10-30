@@ -11,6 +11,7 @@
 #define WRAPPER_LOG_ERROR (1ull << 1)
 #define WRAPPER_LOG_SHADER (1ull << 2)
 #define WRAPPER_LOG_VALIDATION (1ull << 3)
+#define WRAPPER_LOG_BCN (1ull << 4)
 
 struct wrapper_log {
 	char *name;

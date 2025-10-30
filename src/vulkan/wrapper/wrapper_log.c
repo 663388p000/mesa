@@ -17,6 +17,7 @@ static struct wrapper_log wrapper_log_options[] = {
 	{"error", WRAPPER_LOG_ERROR},
 	{"shader", WRAPPER_LOG_SHADER},
 	{"validation", WRAPPER_LOG_VALIDATION},
+	{"bcn", WRAPPER_LOG_BCN},
 	{NULL, 0}
 };
 
