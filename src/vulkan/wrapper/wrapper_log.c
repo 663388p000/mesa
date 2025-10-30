@@ -12,9 +12,15 @@
 if (stat(folder, &sb) != 0 || !S_ISDIR(sb.st_mode)) \
    	mkdir(folder, 770);
 
-char *wrapper_log_level;
-FILE *wrapper_log_file;
-FILE *vvl_log_file;
+static struct wrapper_log wrapper_log_options[] = {
+	{"info", WRAPPER_LOG_INFO},
+	{"error", WRAPPER_LOG_ERROR},
+	{"shader", WRAPPER_LOG_SHADER},
+	{"validation", WRAPPER_LOG_VALIDATION},
+	{NULL, 0}
+};
+
+uint64_t wrapper_log_mask;
 
 static void get_formatted_date_time(char *buf, size_t length) 
 {  
@@ -43,50 +49,86 @@ static char *get_executable_name() {
    return path;
 }
 
-static int is_log_enabled() {
-   if (WRAPPER_LOG_LEVEL(info) || WRAPPER_LOG_LEVEL(error))
-      return 1;
+static unsigned long long get_debug_flag(const char *option) {
+   int index = 0;
+
+   while (wrapper_log_options[index].name != NULL) {
+      if (!strcmp(wrapper_log_options[index].name, option))
+         return wrapper_log_options[index].value;
+         
+      index++;
+   }
 
    return 0;
 }
 
+static void parse_wrapper_debug_str(char *wrapper_log_level_env) {
+   if (!wrapper_log_level_env) {
+      wrapper_log_mask = 0;
+      return;
+   }
+
+   char *option = strtok(wrapper_log_level_env, ",");
+
+   while (option != NULL) {
+      wrapper_log_mask |= get_debug_flag(option);
+      option = strtok(NULL, ",");
+   }
+}
+
+int get_wrapper_log_level(const char *option) {
+    uint64_t flag = get_debug_flag(option);
+
+    if (wrapper_log_mask & flag)
+       return 1;
+
+    return 0;
+}
+
+void write_to_logfile(const char *fmt, const char *level, ...)  {
+   static FILE *wrapper_log_file = NULL;
+   va_list va_args;
+
+   va_start(va_args, level);
+
+   if (!wrapper_log_file) {
+      char *wrapper_log_filename = getenv("WRAPPER_LOG_FILE");
+      char date[256];
+
+      get_formatted_date_time(date, 256);
+      
+      if (!wrapper_log_filename)
+         asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
+         
+      if (!strcmp("stdout", wrapper_log_filename)) {
+         wrapper_log_file = stdout;
+       }
+       else {
+         wrapper_log_file = fopen(wrapper_log_filename, "w");
+       } 
+   }
+
+   if (wrapper_log_file) {
+      fprintf(wrapper_log_file, "[%s]: ", level);
+      vfprintf(wrapper_log_file, fmt, va_args);
+      fprintf(wrapper_log_file, "\n");
+      fflush(wrapper_log_file);
+   }
+
+   va_end(va_args);
+}
+
 void init_wrapper_logging()
 {
-   char date[256];
    struct stat sb;
    
-   if (!wrapper_log_level)
-      wrapper_log_level = getenv("WRAPPER_LOG_LEVEL");
-                                                                 
-   get_formatted_date_time(date, 256);
+   char *wrapper_log_level_env = getenv("WRAPPER_LOG_LEVEL");
+   parse_wrapper_debug_str(wrapper_log_level_env);
 
    CREATE_LOG_FOLDER(WRAPPER_DIR);
    CREATE_LOG_FOLDER(WRAPPER_LOG_PATH);
    CREATE_LOG_FOLDER(WRAPPER_SHADER_LOG_PATH);
    CREATE_LOG_FOLDER(WRAPPER_VALIDATION_LOG_PATH);
-   
-   if (!wrapper_log_file && is_log_enabled()) {
-      char *wrapper_log_filename;
-
-      wrapper_log_filename = getenv("WRAPPER_LOG_FILE");
-
-      if (!wrapper_log_filename)
-         asprintf(&wrapper_log_filename, "%s/%s_%s", WRAPPER_LOG_PATH, get_executable_name(), date);
-
-      if (!strcmp("stdout", wrapper_log_filename)) {
-         wrapper_log_file = stdout;
-      }
-      else {
-         wrapper_log_file = fopen(wrapper_log_filename, "w");
-      }
-   }
-
-   if (!vvl_log_file && WRAPPER_LOG_LEVEL(validation)) {
-      char *vvl_log_filename;
-      
-      asprintf(&vvl_log_filename, "%s/%s_%s", WRAPPER_VALIDATION_LOG_PATH, get_executable_name(), date);
-      vvl_log_file = fopen(vvl_log_filename, "w");
-   }
 }
 
 void dump_shader_code(const uint32_t *code, size_t size) {
@@ -110,9 +152,20 @@ wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeve
                               const VkDebugUtilsMessengerCallbackDataEXT *callbackData,
                               void *userData)
 {
+   static FILE *vvl_log_file = NULL;
    const char* messageIdName = callbackData->pMessageIdName;
    int32_t messageIdNumber = callbackData->messageIdNumber;
    const char* message = callbackData->pMessage;
+
+   if (!vvl_log_file) {
+       char date[256];
+       char *vvl_log_filename;
+
+       get_formatted_date_time(date, 256);
+
+       asprintf(&vvl_log_filename, "%s/%s_%s", WRAPPER_VALIDATION_LOG_PATH, get_executable_name(), date);
+       vvl_log_file = fopen(vvl_log_filename, "w");
+   }
 
    if (vvl_log_file) {
       fprintf(vvl_log_file, "[%s] Code %i : %s\n", messageIdName, messageIdNumber, message);

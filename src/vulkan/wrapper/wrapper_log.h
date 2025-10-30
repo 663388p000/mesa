@@ -7,8 +7,19 @@
 #include <stdlib.h>
 #include <vulkan/vulkan.h>
 
-extern char *wrapper_log_level;
-extern FILE *wrapper_log_file;
+#define WRAPPER_LOG_INFO (1ull << 0)
+#define WRAPPER_LOG_ERROR (1ull << 1)
+#define WRAPPER_LOG_SHADER (1ull << 2)
+#define WRAPPER_LOG_VALIDATION (1ull << 3)
+
+struct wrapper_log {
+	char *name;
+	unsigned long long value;
+};
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void
 init_wrapper_logging(void);
@@ -16,21 +27,28 @@ init_wrapper_logging(void);
 void                                                                         
 dump_shader_code(const uint32_t *code, size_t size);
 
+int 
+get_wrapper_log_level(const char *option);
+
+void
+write_to_logfile(const char *fmt, const char *level, ...);
+
+#ifdef __cplusplus
+}
+#endif
+
 VKAPI_ATTR VkBool32 VKAPI_CALL 
 wrapper_debug_utils_messenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                               VkDebugUtilsMessageTypeFlagsEXT messageTypes,
                               const VkDebugUtilsMessengerCallbackDataEXT *callbackData,
                               void *userData);
 
-#define WRAPPER_LOG_LEVEL(s) (wrapper_log_level && strstr(wrapper_log_level, #s))
+#define WRAPPER_LOG_LEVEL(s) (get_wrapper_log_level(#s))
 
 #define WRAPPER_LOG(level, fmt, ...) \
 do {\
    if (WRAPPER_LOG_LEVEL(level)) {\
-      if (wrapper_log_file) { \
-         fprintf(wrapper_log_file, "[%s]: " fmt "\n", #level, ##__VA_ARGS__);\
-         fflush(wrapper_log_file);\
-      } \
+      write_to_logfile(fmt, #level, ##__VA_ARGS__); \
    }\
 } while (0)
 
