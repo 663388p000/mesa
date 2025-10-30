@@ -33,6 +33,9 @@ get_wrapper_log_level(const char *option);
 void
 write_to_logfile(const char *fmt, const char *level, ...);
 
+char *
+get_executable_name(void);
+
 #ifdef __cplusplus
 }
 #endif

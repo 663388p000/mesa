@@ -30,7 +30,7 @@ static void get_formatted_date_time(char *buf, size_t length)
    strftime(buf, 256, "%F_%H-%M-%S", ptm);
 }
 
-static char *get_executable_name() {
+char *get_executable_name() {
    char *path = malloc(PATH_MAX);
 
    int fd = open("/proc/self/cmdline", O_RDONLY);
