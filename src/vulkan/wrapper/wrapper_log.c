@@ -1,16 +1,11 @@
 #include "wrapper_log.h"
-
-#include <sys/stat.h>
+#include "wrapper_util.h"
 
 #define PATH_MAX_SIZE 1024
 #define WRAPPER_DIR "/sdcard/wrapper"
 #define WRAPPER_SHADER_LOG_PATH WRAPPER_DIR "/shaders"
 #define WRAPPER_LOG_PATH WRAPPER_DIR "/logs"
 #define WRAPPER_VALIDATION_LOG_PATH WRAPPER_DIR "/validation"
-
-#define CREATE_LOG_FOLDER(folder) \
-if (stat(folder, &sb) != 0 || !S_ISDIR(sb.st_mode)) \
-   	mkdir(folder, 770);
 
 static struct wrapper_log wrapper_log_options[] = {
 	{"info", WRAPPER_LOG_INFO},
@@ -121,15 +116,13 @@ void write_to_logfile(const char *fmt, const char *level, ...)  {
 
 void init_wrapper_logging()
 {
-   struct stat sb;
-   
    char *wrapper_log_level_env = getenv("WRAPPER_LOG_LEVEL");
    parse_wrapper_debug_str(wrapper_log_level_env);
 
-   CREATE_LOG_FOLDER(WRAPPER_DIR);
-   CREATE_LOG_FOLDER(WRAPPER_LOG_PATH);
-   CREATE_LOG_FOLDER(WRAPPER_SHADER_LOG_PATH);
-   CREATE_LOG_FOLDER(WRAPPER_VALIDATION_LOG_PATH);
+   CREATE_FOLDER(WRAPPER_DIR);
+   CREATE_FOLDER(WRAPPER_LOG_PATH);
+   CREATE_FOLDER(WRAPPER_SHADER_LOG_PATH);
+   CREATE_FOLDER(WRAPPER_VALIDATION_LOG_PATH);
 }
 
 void dump_shader_code(const uint32_t *code, size_t size) {
