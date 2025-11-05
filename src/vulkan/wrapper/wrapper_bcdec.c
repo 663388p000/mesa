@@ -1,13 +1,21 @@
 #include "wrapper_bcdec.h"
 #include "wrapper_log.h"
+#include "wrapper_util.h"
+
+#define XXH_STATIC_LINKING_ONLY
+#define XXH_IMPLEMENTATION
+#include "util/xxhash.h"
 
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #define BCDEC_BC4BC5_PRECISE
 #define BCDEC_IMPLEMENTATION
 
 #include "bcdec.h"
+
+#define WRAPPER_CACHE_DIR "/data/data/com.winlator.cmod/files/imagefs/usr/cache"
 
 struct decompression_params {
    int block_x;
@@ -170,7 +178,7 @@ is_emulated_bcn(struct wrapper_physical_device *pdev, VkFormat format)
       case VK_FORMAT_BC5_SNORM_BLOCK:
       case VK_FORMAT_BC5_UNORM_BLOCK:
       case VK_FORMAT_BC6H_SFLOAT_BLOCK:
-      case VK_FORMAT_BC6H_UFLOAT_BLOCK:
+      case VK_FORMAT_BC6H_UFLOAT_BLOCK: 
       case VK_FORMAT_BC7_SRGB_BLOCK:
       case VK_FORMAT_BC7_UNORM_BLOCK:
          if (pdev->emulate_bcn > 1)
@@ -193,6 +201,8 @@ decompress_bcn_format(void *srcBuffer,
 {
    static int wrapper_mark_bcn =  -1;
    static int wrapper_no_bcn_thread = -1;
+   static int wrapper_use_bcn_cache = -1;
+   static char *wrapper_cache_path = NULL;
 
    if (wrapper_mark_bcn == -1)
       wrapper_mark_bcn = getenv("WRAPPER_MARK_BCN") && atoi(getenv("WRAPPER_MARK_BCN"));
@@ -200,17 +210,119 @@ decompress_bcn_format(void *srcBuffer,
    if (wrapper_no_bcn_thread == -1)
       wrapper_no_bcn_thread = getenv("WRAPPER_NO_BCN_THREAD") && atoi(getenv("WRAPPER_NO_BCN_THREAD"));
 
+   if (wrapper_use_bcn_cache == -1)
+      wrapper_use_bcn_cache = getenv("WRAPPER_USE_BCN_CACHE") ? atoi(getenv("WRAPPER_USE_BCN_CACHE")) : 0;
+
+   if (wrapper_cache_path == NULL)
+      wrapper_cache_path = getenv("WRAPPER_CACHE_PATH") ? getenv("WRAPPER_CACHE_PATH") : WRAPPER_CACHE_DIR;
+
    int texel_size = get_texel_size_for_format(get_format_for_bcn(format));
    int block_size = get_block_size(format);
    int block_x = (w + 3) / 4;
    int block_y = (h + 3) / 4;
    int stride = w * texel_size;
+   int compressed_size = (block_x * block_y * block_size);
+   int uncompressed_size = w * h * texel_size;
    char *src = srcBuffer + offset;
+   char *dst = dstBuffer;
 
+   if (wrapper_mark_bcn) {
+      WRAPPER_LOG(bcn, "Filling %dx%d BCn %d texture with custom color", w, h, format);
+      
+      for (int i = 0; i < h; i++) {
+         for (int j = 0; j < w; j++) {
+            dst = dstBuffer + (i * stride) + (j * texel_size);
+            
+            switch(format) {
+               case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+               case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
+               case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
+               case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+                  /* Yellow */
+                  dst[0] = 0xFF;
+                  dst[1] = 0xFF;
+                  dst[2] = 0;
+                  dst[3] = 255;
+                  break;
+               case VK_FORMAT_BC2_SRGB_BLOCK:
+               case VK_FORMAT_BC2_UNORM_BLOCK:
+                  /* Blue */
+                  dst[0] = 0;
+                  dst[1] = 0;
+                  dst[2] = 0xFF;
+                  dst[3] = 255;
+                  break;
+                case VK_FORMAT_BC3_UNORM_BLOCK:
+                case VK_FORMAT_BC3_SRGB_BLOCK:
+                  /* Light Blue */
+                  dst[0] = 0;
+                  dst[1] = 0xFF;
+                  dst[2] = 0xFF;
+                  dst[3] = 255;
+                  break;
+               case VK_FORMAT_BC4_UNORM_BLOCK:
+               case VK_FORMAT_BC4_SNORM_BLOCK:
+                  /* Red */
+                  dst[0] = 0xFF;
+                  break;
+               case VK_FORMAT_BC5_UNORM_BLOCK:
+               case VK_FORMAT_BC5_SNORM_BLOCK:
+                  /* Green */
+                  dst[0] = 0;
+                  dst[1] = 0xFF;
+                  break;
+               case VK_FORMAT_BC6H_SFLOAT_BLOCK:
+               case VK_FORMAT_BC6H_UFLOAT_BLOCK:
+                  /* Purple */
+                  dst[0] = 0x90;
+                  dst[1] = 0x40;
+                  dst[2] = 0xA0;
+                  break;
+               case VK_FORMAT_BC7_UNORM_BLOCK:
+               case VK_FORMAT_BC7_SRGB_BLOCK:
+                  /* Black */
+                  dst[0] = 0xFF;
+                  dst[1] = 0;
+                  dst[2] = 0xFF;
+                  dst[3] = 255;
+                  break;
+               default:
+                  break;
+            }
+         }
+      }
+
+      return;
+   }
+
+   CREATE_FOLDER(WRAPPER_CACHE_DIR, 0700);
+   
+   XXH64_hash_t hash = XXH64(src, compressed_size, 0);
+   char *cache_filename;
+   asprintf(&cache_filename, "%s/%s_%llu.cache", wrapper_cache_path, get_executable_name(), (unsigned long long)hash);
+
+   if (access(cache_filename, F_OK) == 0 && wrapper_use_bcn_cache) {
+      FILE *fp = fopen(cache_filename, "rb");
+      size_t length = fread(dst, 1, uncompressed_size, fp);
+      fclose(fp);
+      if (length == uncompressed_size) {
+         WRAPPER_LOG(bcn, "Successfully restored texture %s from cache", cache_filename);
+         free(cache_filename);
+         return;
+      }
+      else {
+         WRAPPER_LOG(bcn, "Failed to restore texture %s from cache, decompressing from huffer", cache_filename);
+         unlink(cache_filename);
+      }   
+   }  
+   
    if (wrapper_no_bcn_thread) {
+      WRAPPER_LOG(bcn, "Decompressing %dx%d BCN %d texture from main thread", 
+         w, h, format);
+         
       struct decompression_params args[1];
       args[0].src = src;
-      args[0].dst = dstBuffer;
+      args[0].dst = dst;
       args[0].block_x = block_x;
       args[0].format = format;
       args[0].block_y_count = block_y;
@@ -235,10 +347,13 @@ decompress_bcn_format(void *srcBuffer,
       struct decompression_params *args = malloc(sizeof(struct decompression_params) * num_threads);
       int current_row = 0;
 
+      WRAPPER_LOG(bcn, "Decompressing %dx%d BCN %d texture using %d threads",
+         w, h, format, num_threads);
+
       for (int i = 0; i < num_threads; i++) {
          int rows = rows_per_thread + ((i < rem) ? 1 : 0);
          args[i].src = src + (current_row * block_x * block_size);
-         args[i].dst = dstBuffer;
+         args[i].dst = dst;
          args[i].block_x = block_x;
          args[i].format = format;
          args[i].block_y_count = rows;
@@ -256,67 +371,19 @@ decompress_bcn_format(void *srcBuffer,
       free(threads);
       free(args);
    }
-   
-   if (wrapper_mark_bcn) {
-      WRAPPER_LOG(info, "Marking BCn texture");
-      char *dst = dstBuffer;
-      for (int i = 0; i < w; i++) {
-         switch(format) {
-            case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
-            case VK_FORMAT_BC1_RGB_SRGB_BLOCK:                                          
-            case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:                                          
-            case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
-            /* Yellow */
-               dst[i * texel_size] = 0xFF;
-               dst[i * texel_size + 1] = 0xFF;
-               dst[i * texel_size + 2] = 0;
-               dst[i * texel_size + 3] = 255;
-               break;
-            case VK_FORMAT_BC2_SRGB_BLOCK:
-            case VK_FORMAT_BC2_UNORM_BLOCK:
-            /* Blue */
-               dst[i * texel_size] = 0;
-               dst[i * texel_size + 1] = 0;
-               dst[i * texel_size + 2] = 0xFF;
-               dst[i * texel_size + 3] = 255;
-               break;
-            case VK_FORMAT_BC3_UNORM_BLOCK:
-            case VK_FORMAT_BC3_SRGB_BLOCK:
-            /* Light Blue */
-               dst[i * texel_size] = 0;
-               dst[i * texel_size + 1] = 0xFF;
-               dst[i * texel_size + 2] = 0xFF;
-               dst[i * texel_size + 3] = 255;
-               break;
-            case VK_FORMAT_BC4_UNORM_BLOCK:
-            case VK_FORMAT_BC4_SNORM_BLOCK:
-            /* Red */
-               dst[i * texel_size] = 0xFF;
-               break;
-            case VK_FORMAT_BC5_UNORM_BLOCK:
-            case VK_FORMAT_BC5_SNORM_BLOCK:
-            /* Green */
-               dst[i * texel_size] = 0;
-               dst[i * texel_size + 1] = 0xFF;
-               break;
-            case VK_FORMAT_BC6H_SFLOAT_BLOCK:                                            
-            case VK_FORMAT_BC6H_UFLOAT_BLOCK:
-            /* Purple */
-               dst[i * texel_size] = 0x90;
-               dst[i * texel_size + 1] = 0x40;
-               dst[i * texel_size + 2] = 0xA0;
-               break;
-            case VK_FORMAT_BC7_UNORM_BLOCK:
-            case VK_FORMAT_BC7_SRGB_BLOCK:
-            /* Black */
-               dst[i * texel_size] = 0xFF;                                                  
-               dst[i * texel_size + 1] = 0xFF;                                              
-               dst[i * texel_size + 2] = 0xFF;                                                 
-               dst[i * texel_size + 3] = 255;
-               break;
-            default:
-               break;
-         }
+
+   if (access(cache_filename, F_OK) != 0 && wrapper_use_bcn_cache) {
+      FILE *fp = fopen(cache_filename, "wb");
+      size_t length = fwrite(dst, 1, uncompressed_size, fp);
+      fclose(fp);
+      if (length == uncompressed_size)
+         WRAPPER_LOG(bcn, "Saved texture %s to cache", cache_filename);
+      else {
+         WRAPPER_LOG(bcn, "Failed to save texture %s to cache", cache_filename);
+         unlink(cache_filename);
       }
    }
+
+   free(cache_filename);
+   
 }
