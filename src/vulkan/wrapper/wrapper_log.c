@@ -119,10 +119,10 @@ void init_wrapper_logging()
    char *wrapper_log_level_env = getenv("WRAPPER_LOG_LEVEL");
    parse_wrapper_debug_str(wrapper_log_level_env);
 
-   CREATE_FOLDER(WRAPPER_DIR);
-   CREATE_FOLDER(WRAPPER_LOG_PATH);
-   CREATE_FOLDER(WRAPPER_SHADER_LOG_PATH);
-   CREATE_FOLDER(WRAPPER_VALIDATION_LOG_PATH);
+   CREATE_FOLDER(WRAPPER_DIR, 0770);
+   CREATE_FOLDER(WRAPPER_LOG_PATH, 0770);
+   CREATE_FOLDER(WRAPPER_SHADER_LOG_PATH, 0770);
+   CREATE_FOLDER(WRAPPER_VALIDATION_LOG_PATH, 0770);
 }
 
 void dump_shader_code(const uint32_t *code, size_t size) {
