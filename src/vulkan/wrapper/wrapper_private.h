@@ -67,7 +67,6 @@ struct wrapper_device {
    struct list_head device_memory_list;
    struct list_head buffer_list;
    struct list_head image_list;
-   struct list_head staging_buffers_list;
    struct wrapper_physical_device *physical;
    struct vk_device_dispatch_table dispatch_table;
 };
@@ -84,6 +83,7 @@ struct wrapper_buffer {
    VkDeviceSize size;
    VkDeviceSize offset;
    void *mapped_address;
+   int is_mapped;
    VkDeviceMemory memory;
    struct wrapper_command_buffer *wcb;
 };
@@ -102,9 +102,9 @@ struct wrapper_command_buffer {
 
    struct wrapper_device *device;
    struct list_head link;
+   struct list_head staging_buffers_list;
    VkCommandPool pool;
    VkCommandBuffer dispatch_handle;
-   VkFence fence;
 };
 
 VK_DEFINE_HANDLE_CASTS(wrapper_command_buffer, vk.base, VkCommandBuffer,

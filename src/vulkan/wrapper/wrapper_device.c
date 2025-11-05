@@ -54,9 +54,9 @@ get_wrapper_image_from_handle(struct wrapper_device *device, VkImage image) {
       &device->image_list, link) {
       if (wi->dispatch_handle == image)
             return wi;
-      }
+   }
    
-      return NULL;
+   return NULL;
 }
 
 static void
@@ -234,7 +234,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    list_inithead(&device->device_memory_list);
    list_inithead(&device->buffer_list);
    list_inithead(&device->image_list);
-   list_inithead(&device->staging_buffers_list);
+   
    simple_mtx_init(&device->resource_mutex, mtx_plain);
    device->physical = physical_device;
 
@@ -341,11 +341,6 @@ wrapper_buffer_destroy(struct wrapper_device *device,
 					   struct wrapper_buffer *wb,
 					   const VkAllocationCallbacks *pAllocator)
 {
-   if (wb->mapped_address) {
-      device->dispatch_table.UnmapMemory(device->dispatch_handle,
-         wb->memory);
-   }
-   
    device->dispatch_table.DestroyBuffer(device->dispatch_handle,
       wb->dispatch_handle, pAllocator);
    
@@ -566,7 +561,6 @@ wrapper_QueueSubmit(VkQueue _queue, uint32_t submitCount,
       for (int j = 0; j < submit_info->commandBufferCount; j++) {
          VK_FROM_HANDLE(wrapper_command_buffer, wcb,
                         submit_info->pCommandBuffers[j]);
-         wcb->fence = fence;
          command_buffers[j] = wcb->dispatch_handle;
          
       }
@@ -628,28 +622,7 @@ wrapper_WaitForFences(VkDevice _device,
    res = device->dispatch_table.WaitForFences(device->dispatch_handle,
      fenceCount, pFences, waitAll, timeout);
 
-   if (res != VK_SUCCESS)
-      return res;
-
-   for (uint32_t i = 0; i < fenceCount; i++) {
-      VkFence fence = pFences[i];
-      VkResult result = device->dispatch_table.GetFenceStatus(device->dispatch_handle,
-         fence);
-      if (result != VK_SUCCESS)
-         continue;
-      list_for_each_entry_safe(struct wrapper_buffer, wb, 
-                               &device->staging_buffers_list, link)
-      {
-         if (wb->wcb->fence == fence) {
-            VkDeviceMemory memory = wb->memory;
-            wrapper_buffer_destroy(device, wb, NULL);
-            device->dispatch_table.FreeMemory(device->dispatch_handle,
-              memory, NULL);
-         }
-      }
-    }
-
-   return VK_SUCCESS;
+   return res;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -714,6 +687,8 @@ wrapper_command_buffer_create(struct wrapper_device *device,
    wcb->dispatch_handle = dispatch_handle;
    list_add(&wcb->link, &device->command_buffer_list);
 
+   list_inithead(&wcb->staging_buffers_list);
+
    *pCommandBuffers = wrapper_command_buffer_to_handle(wcb);
 
    return VK_SUCCESS;
@@ -724,6 +699,15 @@ wrapper_command_buffer_destroy(struct wrapper_device *device,
                                struct wrapper_command_buffer *wcb) {
    if (wcb == NULL)
       return;
+
+   list_for_each_entry_safe(struct wrapper_buffer, wb,
+                                  &wcb->staging_buffers_list, link)
+   {
+      VkDeviceMemory memory = wb->memory;
+      wrapper_buffer_destroy(device, wb, NULL);
+      device->dispatch_table.FreeMemory(device->dispatch_handle,
+         memory, NULL);
+   }
 
    device->dispatch_table.FreeCommandBuffers(
       device->dispatch_handle, wcb->pool, 1, &wcb->dispatch_handle);
@@ -799,7 +783,9 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
       return;
    }
 
-   if (!wb->mapped_address) {
+   simple_mtx_lock(&device->resource_mutex);
+   
+   if (!wb->is_mapped) {
       res = device->dispatch_table.MapMemory(device->dispatch_handle,
          wb->memory, wb->offset, wb->size, 0, &wb->mapped_address);
          
@@ -807,22 +793,8 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
          WRAPPER_LOG(error, "Failed to map source buffer memory, res %d", res);
          return;
       }
-  
-      VkMappedMemoryRange srcRanges = {
-         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-         .offset = wb->offset,
-         .size = wb->size,
-         .memory = wb->memory,
-      };
-  
-   
-      res = device->dispatch_table.InvalidateMappedMemoryRanges(device->dispatch_handle,
-         1, &srcRanges);
 
-      if (res != VK_SUCCESS) {
-         WRAPPER_LOG(error, "Failed to invalidate source buffer memory ranges, res %d", res);
-         return;
-      }
+      wb->is_mapped = 1;
    }
    
    for (int i = 0; i < regionCount; i++) {
@@ -882,26 +854,8 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
          return;
       }
 
-       WRAPPER_LOG(info, "Command Buffer %p Fence %p: Decompressing region %d of buffer %p from offset %d to %dx%d image %p of format %d using staging VkBuffer %p",
-         wcb->dispatch_handle, wcb->fence, i, wb->dispatch_handle, offset, w, h, wi->dispatch_handle, format, stagingBuffer);
-
       decompress_bcn_format(wb->mapped_address, dstData, w, h, format, offset);
-
-      VkMappedMemoryRange dstRanges = {
-         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-         .offset = 0,
-         .size = w * h * texel_size,
-         .memory = stagingBufferMemory,
-      };
-
-      res = device->dispatch_table.FlushMappedMemoryRanges(device->dispatch_handle,
-         1, &dstRanges);
-
-      if (res != VK_SUCCESS) {
-         WRAPPER_LOG(error, "Failed to flush staging buffer memory range, res %d", res);
-         return;
-      }
-
+      
       copy_region.bufferOffset = 0;
       copy_region.bufferRowLength = 0;
       copy_region.bufferImageHeight = 0;
@@ -909,17 +863,26 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
       device->dispatch_table.CmdCopyBufferToImage(wcb->dispatch_handle,
          stagingBuffer, dstImage, dstLayout, 1, &copy_region);
 
-      struct wrapper_buffer *wb = vk_object_zalloc(&device->vk,
+      struct wrapper_buffer *staging_wb = vk_object_zalloc(&device->vk,
          &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
 
-      wb->dispatch_handle = stagingBuffer;
-      wb->memory = stagingBufferMemory;
-      wb->mapped_address = dstData;
-      wb->wcb = wcb;
-      wb->device = device;
+      staging_wb->dispatch_handle = stagingBuffer;
+      staging_wb->memory = stagingBufferMemory;
+      staging_wb->mapped_address = dstData;
+      staging_wb->wcb = wcb;
+      staging_wb->device = device;
 
-      list_add(&wb->link, &device->staging_buffers_list);
+      list_add(&staging_wb->link, &wcb->staging_buffers_list);
    }
+
+   if (wb->is_mapped) {
+      device->dispatch_table.UnmapMemory(device->dispatch_handle,
+         wb->memory);
+
+      wb->is_mapped = 0;
+   }
+
+   simple_mtx_unlock(&device->resource_mutex);
 }
 
 VKAPI_ATTR void VKAPI_CALL
