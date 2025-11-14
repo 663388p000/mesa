@@ -224,6 +224,7 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    VkPhysicalDeviceFeatures2 *pdf2;
    VkPhysicalDeviceFeatures *pdf;
    VkResult result;
+   static int wrapper_safe_create_device = -1;
 
    device = vk_zalloc2(&physical_device->instance->vk.alloc, pAllocator,
                        sizeof(*device), 8, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
@@ -294,16 +295,30 @@ if (pdf2 && pdf2->features.f) { \
          WRAPPER_LOG(info, "Enabling device extension %s", wrapper_enable_extensions[i]);
       }
    }
+
+   if (wrapper_safe_create_device == -1) {
+      wrapper_safe_create_device = getenv("WRAPPER_SAFE_CREATE_DEVICE") ? atoi(getenv("WRAPPER_SAFE_CREATE_DEVICE")) : 1;
+   }
    
    result = physical_device->dispatch_table.CreateDevice(
       physical_device->dispatch_handle, &wrapper_create_info,
          pAllocator, &device->dispatch_handle);
 
    if (result != VK_SUCCESS) {
-      WRAPPER_LOG(error, "Failed driver createDevice, res %d", result);
-      wrapper_DestroyDevice(wrapper_device_to_handle(device),
-                            &device->vk.alloc);
-      return vk_error(physical_device, result);
+      if (wrapper_safe_create_device) {
+         WRAPPER_LOG(info, "Forcing device creation with a NULL pNext chain");
+         wrapper_create_info.pNext = NULL;
+         result = physical_device->dispatch_table.CreateDevice(
+            physical_device->dispatch_handle, &wrapper_create_info,
+               pAllocator, &device->dispatch_handle);
+      }
+      
+      if (result != VK_SUCCESS) {
+         WRAPPER_LOG(error, "Failed driver createDevice, res %d", result);
+         wrapper_DestroyDevice(wrapper_device_to_handle(device),
+                               &device->vk.alloc);
+         return vk_error(physical_device, result);
+      }
    }
 
    void *gdpa = physical_device->instance->dispatch_table.GetInstanceProcAddr(
