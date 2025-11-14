@@ -104,6 +104,7 @@ struct wrapper_command_buffer {
    struct list_head link;
    struct list_head staging_buffers_list;
    VkCommandPool pool;
+   VkFence fence;
    VkCommandBuffer dispatch_handle;
 };
 

@@ -341,6 +341,9 @@ wrapper_buffer_destroy(struct wrapper_device *device,
 					   struct wrapper_buffer *wb,
 					   const VkAllocationCallbacks *pAllocator)
 {
+   if (wb == NULL)
+      return; 
+      
    device->dispatch_table.DestroyBuffer(device->dispatch_handle,
       wb->dispatch_handle, pAllocator);
    
@@ -357,20 +360,23 @@ wrapper_CreateBuffer(VkDevice _device,
    VK_FROM_HANDLE(wrapper_device, device, _device);
    VkResult res;
 
-   struct wrapper_buffer *wb = vk_object_zalloc(&device->vk, 
-      &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
-
-   if (!wb) {
-      WRAPPER_LOG(error, "Failed to allocate wrapper_buffer");
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
-   }
-
    res = device->dispatch_table.CreateBuffer(device->dispatch_handle,
       pCreateInfo, pAllocator, pBuffer);
 
    if (res != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to create buffer, res %d", res);
       return res;
+   }
+
+   simple_mtx_lock(&device->resource_mutex);
+
+   struct wrapper_buffer *wb = vk_object_zalloc(&device->vk, 
+      &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
+
+   if (!wb) {
+      WRAPPER_LOG(error, "Failed to allocate wrapper_buffer");
+      simple_mtx_unlock(&device->resource_mutex);
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
       
    wb->device = device;
@@ -379,6 +385,8 @@ wrapper_CreateBuffer(VkDevice _device,
 
    list_add(&wb->link, &device->buffer_list);
 
+   simple_mtx_unlock(&device->resource_mutex);
+   
    return VK_SUCCESS;
 }
 
@@ -391,23 +399,28 @@ wrapper_BindBufferMemory(VkDevice _device,
    VK_FROM_HANDLE(wrapper_device, device, _device);
    VkResult res;
 
-   struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
-
-   if (wb == NULL) {
-      WRAPPER_LOG(error, "Failed to query wrapper_buffer");
-      return VK_ERROR_INITIALIZATION_FAILED;
-   }
-
    res = device->dispatch_table.BindBufferMemory(device->dispatch_handle,
       buffer, memory, memoryOffset);
-
+   
    if (res != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to bind buffer memory, res %d", res);
       return res;
    }
 
+   simple_mtx_lock(&device->resource_mutex);
+
+   struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
+
+   if (wb == NULL) {
+      WRAPPER_LOG(error, "Failed to query wrapper_buffer");
+      simple_mtx_unlock(&device->resource_mutex);
+      return VK_ERROR_INITIALIZATION_FAILED;
+   }
+
    wb->memory = memory;
    wb->offset = memoryOffset;
+
+   simple_mtx_unlock(&device->resource_mutex);
 
    return VK_SUCCESS;
 }
@@ -419,12 +432,12 @@ wrapper_DestroyBuffer(VkDevice _device,
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
 
+   simple_mtx_lock(&device->resource_mutex);
+
    struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
-
-   if (wb == NULL)
-      return;
-
    wrapper_buffer_destroy(device, wb, pAllocator);
+
+   simple_mtx_unlock(&device->resource_mutex);
 }
 
 static void 
@@ -561,6 +574,7 @@ wrapper_QueueSubmit(VkQueue _queue, uint32_t submitCount,
       for (int j = 0; j < submit_info->commandBufferCount; j++) {
          VK_FROM_HANDLE(wrapper_command_buffer, wcb,
                         submit_info->pCommandBuffers[j]);
+         wcb->fence = fence;
          command_buffers[j] = wcb->dispatch_handle;
          
       }
@@ -593,6 +607,7 @@ wrapper_QueueSubmit2(VkQueue _queue, uint32_t submitCount,
       for (int j = 0; j < submit_info->commandBufferInfoCount; j++) {
          VK_FROM_HANDLE(wrapper_command_buffer, wcb,
                         submit_info->pCommandBufferInfos[j].commandBuffer);
+         wcb->fence = fence;
          command_buffers[j] = pSubmits[i].pCommandBufferInfos[j];
          command_buffers[j].commandBuffer = wcb->dispatch_handle;
       }
@@ -621,6 +636,30 @@ wrapper_WaitForFences(VkDevice _device,
 
    res = device->dispatch_table.WaitForFences(device->dispatch_handle,
      fenceCount, pFences, waitAll, timeout);
+
+   if (res != VK_SUCCESS || device->physical->emulate_bcn < 2)
+      return res;
+
+   simple_mtx_lock(&device->resource_mutex);
+
+   list_for_each_entry_safe(struct wrapper_command_buffer, wcb,
+                            &device->command_buffer_list, link)
+   {
+       for (uint32_t i = 0; i < fenceCount; i++) {
+          if (wcb->fence == pFences[i]) {
+             list_for_each_entry_safe(struct wrapper_buffer, wb,
+                                      &wcb->staging_buffers_list, link)
+             {
+                VkDeviceMemory memory = wb->memory;
+                wrapper_buffer_destroy(device, wb, NULL);
+                device->dispatch_table.FreeMemory(device->dispatch_handle,
+                memory, NULL);
+             }
+          }
+       }
+   }
+
+   simple_mtx_unlock(&device->resource_mutex);
 
    return res;
 }
@@ -699,15 +738,6 @@ wrapper_command_buffer_destroy(struct wrapper_device *device,
                                struct wrapper_command_buffer *wcb) {
    if (wcb == NULL)
       return;
-
-   list_for_each_entry_safe(struct wrapper_buffer, wb,
-                                  &wcb->staging_buffers_list, link)
-   {
-      VkDeviceMemory memory = wb->memory;
-      wrapper_buffer_destroy(device, wb, NULL);
-      device->dispatch_table.FreeMemory(device->dispatch_handle,
-         memory, NULL);
-   }
 
    device->dispatch_table.FreeCommandBuffers(
       device->dispatch_handle, wcb->pool, 1, &wcb->dispatch_handle);
