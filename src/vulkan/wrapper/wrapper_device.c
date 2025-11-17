@@ -460,6 +460,9 @@ wrapper_image_destroy(struct wrapper_device *device,
 					  struct wrapper_image *wi,
 					  const VkAllocationCallbacks *pAllocator)
 {
+   if (wi == NULL)
+      return;
+      
    device->dispatch_table.DestroyImage(device->dispatch_handle,
       wi->dispatch_handle, pAllocator);
    
@@ -477,27 +480,29 @@ wrapper_CreateImage(VkDevice _device,
    VkResult res;
    VkImageCreateInfo create_info = *pCreateInfo;
 
+   if (is_emulated_bcn(device->physical, pCreateInfo->format)) {
+      create_info.format = get_format_for_bcn(pCreateInfo->format);
+      if (create_info.flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT)
+         create_info.flags &= ~VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+   }
+
+   res = device->dispatch_table.CreateImage(device->dispatch_handle,
+      &create_info, pAllocator, pImage);
+   
+   if (res != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to create image, res %d", res);
+      return res;
+   }
+
+   simple_mtx_lock(&device->resource_mutex);
+
    struct wrapper_image *wi = vk_object_zalloc(&device->vk,
       &device->vk.alloc, sizeof(struct wrapper_image), VK_OBJECT_TYPE_IMAGE);
 
    if (!wi) {
       WRAPPER_LOG(error, "Failed to allocate wrapper_image");
+      simple_mtx_unlock(&device->resource_mutex);
       return VK_ERROR_OUT_OF_HOST_MEMORY;
-   }
-
-   if (is_emulated_bcn(device->physical, pCreateInfo->format)) {
-      create_info.format = get_format_for_bcn(pCreateInfo->format);
-      if (create_info.flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT) {
-         create_info.flags &= ~VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
-      }
-   }
-   
-   res = device->dispatch_table.CreateImage(device->dispatch_handle,
-      &create_info, pAllocator, pImage);
-
-   if (res != VK_SUCCESS) {
-      WRAPPER_LOG(error, "Failed to create image, res %d", res);
-      return res;
    }
 
    wi->device = device;
@@ -505,6 +510,8 @@ wrapper_CreateImage(VkDevice _device,
    wi->dispatch_handle = *pImage;
 
    list_add(&wi->link, &device->image_list);
+
+   simple_mtx_unlock(&device->resource_mutex);
 
    return VK_SUCCESS;
 }
@@ -517,15 +524,31 @@ wrapper_CreateImageView(VkDevice _device,
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
    VkImageViewCreateInfo create_info = *pCreateInfo;
+   VkResult result;
+
+   simple_mtx_lock(&device->resource_mutex);
 
    struct wrapper_image *wi = get_wrapper_image_from_handle(device, pCreateInfo->image);
+
+   if (wi == NULL) {
+      WRAPPER_LOG(error, "Failed to query wrapper_image");
+      simple_mtx_unlock(&device->resource_mutex);
+      return VK_ERROR_INITIALIZATION_FAILED;
+   }
 
    if (is_emulated_bcn(device->physical, wi->info.format)) {
       create_info.format = get_format_for_bcn(pCreateInfo->format);
    }
 
-   return device->dispatch_table.CreateImageView(device->dispatch_handle,
+   result = device->dispatch_table.CreateImageView(device->dispatch_handle,
      &create_info, pAllocator, pView);
+
+   if (result != VK_SUCCESS)
+   	  WRAPPER_LOG(error, "Failed to create image view, res %d", result);   	  
+
+   simple_mtx_unlock(&device->resource_mutex);
+
+   return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -535,12 +558,12 @@ wrapper_DestroyImage(VkDevice _device,
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
 
+   simple_mtx_lock(&device->resource_mutex);
+
    struct wrapper_image *wi = get_wrapper_image_from_handle(device, image);
-
-   if (wi == NULL)
-      return;
-
    wrapper_image_destroy(device, wi, pAllocator);
+
+   simple_mtx_unlock(&device->resource_mutex);
 }
 
 VKAPI_ATTR void VKAPI_CALL
