@@ -34,6 +34,9 @@ bool set_layer_paths() {
    get_function_pointer(getLayerPaths, "_ZN7android11GraphicsEnv13getLayerPathsEv");
    get_function_pointer(getAppNamespace, "_ZN7android11GraphicsEnv15getAppNamespaceEv");
    get_function_pointer(setLayerPaths, "_ZN7android11GraphicsEnv13setLayerPathsEPNS_21NativeLoaderNamespaceERKNSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEE");
+   if (!setLayerPaths) {
+      get_function_pointer(setLayerPaths, "_ZN7android11GraphicsEnv13setLayerPathsEPNS_21NativeLoaderNamespaceENSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEE");
+   }
 
    if (!getInstance || !getLayerPaths || !getAppNamespace || !setLayerPaths) {
       WRAPPER_LOG(error, "Failed to get function pointers from libgraphicsenv.so");
