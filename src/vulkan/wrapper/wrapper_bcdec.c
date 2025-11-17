@@ -90,7 +90,7 @@ decompression_routine(void *args)
                break;
             case VK_FORMAT_BC6H_SFLOAT_BLOCK:
             case VK_FORMAT_BC6H_UFLOAT_BLOCK:
-               bcdec_bc6h_half(src, dst, params->stride, params->format == VK_FORMAT_BC6H_SFLOAT_BLOCK);
+               bcdec_bc6h_half(src, dst, (params->stride / params->texel_size) * 3, params->format == VK_FORMAT_BC6H_SFLOAT_BLOCK);
                src += BCDEC_BC6H_BLOCK_SIZE;
                break;
             case VK_FORMAT_BC7_SRGB_BLOCK:
