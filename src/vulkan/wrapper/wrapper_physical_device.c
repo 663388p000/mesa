@@ -256,16 +256,19 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
       char *wrapper_emulate_bcn_env = getenv("WRAPPER_EMULATE_BCN");
 
-      if (!wrapper_emulate_bcn_env) {
+      if (!wrapper_emulate_bcn_env) 
+         wrapper_emulate_bcn = 3;
+      else 
+         wrapper_emulate_bcn = atoi(wrapper_emulate_bcn_env);
+
+      if (wrapper_emulate_bcn >= 3)  {
          if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY &&
              driver_version >= VK_MAKE_VERSION(512, 530, 0)) {
             wrapper_emulate_bcn = (pdevice->base_supported_features.textureCompressionBC) ?
                0 : 1;
-         } else {
-            wrapper_emulate_bcn = 3;
+         } else if (pdevice->driver_properties.driverID == VK_DRIVER_ID_MESA_TURNIP) {
+            wrapper_emulate_bcn = 0;
          }
-      } else {
-         wrapper_emulate_bcn = atoi(wrapper_emulate_bcn_env);
       }
 
       pdevice->emulate_bcn = wrapper_emulate_bcn;
