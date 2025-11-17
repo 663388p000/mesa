@@ -707,6 +707,7 @@ x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
    xcb_get_geometry_cookie_t geom_cookie;
    xcb_generic_error_t *err;
    xcb_get_geometry_reply_t *geom;
+   static int wrapper_max_image_count = -1;
 
    geom_cookie = xcb_get_geometry(conn, window);
 
@@ -730,9 +731,22 @@ x11_surface_get_capabilities(VkIcdSurfaceBase *icd_surface,
                                       VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
    }
 
-   caps->minImageCount = 1;
-   /* There is no real maximum */
-   caps->maxImageCount = 1;
+   if (wrapper_max_image_count == -1)
+      wrapper_max_image_count = getenv("WRAPPER_MAX_IMAGE_COUNT") ? atoi(getenv("WRAPPER_MAX_IMAGE_COUNT")) : 0;
+
+   if (present_mode) {
+      caps->minImageCount = x11_get_min_image_count_for_present_mode(wsi_device, wsi_conn, present_mode->presentMode);
+   } else {
+      caps->minImageCount = x11_get_min_image_count(wsi_device, wsi_conn->is_xwayland);
+   }
+
+   if (wrapper_max_image_count > 0) {
+      caps->minImageCount = wrapper_max_image_count;
+      caps->maxImageCount = wrapper_max_image_count;
+   } else {
+      /* There is no real maximum */
+      caps->maxImageCount = 0;
+   }
 
    caps->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
    caps->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
