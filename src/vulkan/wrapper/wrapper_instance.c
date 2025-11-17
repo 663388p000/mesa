@@ -295,8 +295,9 @@ wrapper_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       wrapper_application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
       wrapper_application_info.pApplicationName = "wrapper";
       wrapper_application_info.pEngineName = "wrapper";
+      enumerate_instance_version(&wrapper_application_info.apiVersion);
    }
-   enumerate_instance_version(&wrapper_application_info.apiVersion);
+      
    wrapper_create_info.pApplicationInfo = &wrapper_application_info;
    
    if (WRAPPER_LOG_LEVEL(validation)) {
