@@ -12,6 +12,7 @@
 #include "vulkan/util/vk_dispatch_table.h"
 #include "vulkan/wsi/wsi_common.h"
 #include "util/simple_mtx.h"
+#include "util/hash_table.h"
 #include "adrenotools/driver.h"
 
 extern const struct vk_instance_extension_table wrapper_instance_extensions;
@@ -67,6 +68,8 @@ struct wrapper_device {
    struct list_head device_memory_list;
    struct list_head buffer_list;
    struct list_head image_list;
+   struct hash_table_u64 *buffer_table;
+   struct hash_table_u64 *image_table;
    struct wrapper_physical_device *physical;
    struct vk_device_dispatch_table dispatch_table;
 };

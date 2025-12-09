@@ -39,24 +39,24 @@ const struct vk_device_extension_table wrapper_filter_extensions =
 
 struct wrapper_buffer *
 get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer) {
-   list_for_each_entry_safe(struct wrapper_buffer, wb,
-      &device->buffer_list, link) {
-      if (wb->dispatch_handle == buffer)
-         return wb;
-   }
+   struct wrapper_buffer *wb = NULL;
 
-   return NULL;
+   simple_mtx_lock(&device->resource_mutex);
+   wb = _mesa_hash_table_u64_search(device->buffer_table, (uint64_t) buffer);
+   simple_mtx_unlock(&device->resource_mutex);
+
+   return wb;
 }
 
 struct wrapper_image *
 get_wrapper_image_from_handle(struct wrapper_device *device, VkImage image) {
-   list_for_each_entry_safe(struct wrapper_image, wi,
-      &device->image_list, link) {
-      if (wi->dispatch_handle == image)
-            return wi;
-   }
+   struct wrapper_image *wi = NULL;
    
-   return NULL;
+   simple_mtx_lock(&device->resource_mutex);
+   wi = _mesa_hash_table_u64_search(device->image_table, (uint64_t) image);
+   simple_mtx_unlock(&device->resource_mutex);
+   
+   return wi;
 }
 
 static void
@@ -233,8 +233,10 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
 
    list_inithead(&device->command_buffer_list);
    list_inithead(&device->device_memory_list);
-   list_inithead(&device->buffer_list);
    list_inithead(&device->image_list);
+   list_inithead(&device->buffer_list);
+   device->image_table = _mesa_hash_table_u64_create(NULL);
+   device->buffer_table = _mesa_hash_table_u64_create(NULL);
    
    simple_mtx_init(&device->resource_mutex, mtx_plain);
    device->physical = physical_device;
@@ -357,12 +359,18 @@ wrapper_buffer_destroy(struct wrapper_device *device,
 					   const VkAllocationCallbacks *pAllocator)
 {
    if (wb == NULL)
-      return; 
+      return;
+
+   simple_mtx_lock(&device->resource_mutex);
       
    device->dispatch_table.DestroyBuffer(device->dispatch_handle,
       wb->dispatch_handle, pAllocator);
-   
+
+   _mesa_hash_table_u64_remove(device->buffer_table, (uint64_t)wb->dispatch_handle);
    list_del(&wb->link);
+
+   simple_mtx_unlock(&device->resource_mutex);
+   
    vk_object_free(&device->vk, &device->vk.alloc, wb);
 }
 
@@ -399,6 +407,7 @@ wrapper_CreateBuffer(VkDevice _device,
    wb->dispatch_handle = *pBuffer;
 
    list_add(&wb->link, &device->buffer_list);
+   _mesa_hash_table_u64_insert(device->buffer_table, (uint64_t)wb->dispatch_handle, wb);
 
    simple_mtx_unlock(&device->resource_mutex);
    
@@ -422,10 +431,7 @@ wrapper_BindBufferMemory(VkDevice _device,
       return res;
    }
 
-   simple_mtx_lock(&device->resource_mutex);
-
    struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
-
    if (wb == NULL) {
       WRAPPER_LOG(error, "Failed to query wrapper_buffer");
       simple_mtx_unlock(&device->resource_mutex);
@@ -434,8 +440,6 @@ wrapper_BindBufferMemory(VkDevice _device,
 
    wb->memory = memory;
    wb->offset = memoryOffset;
-
-   simple_mtx_unlock(&device->resource_mutex);
 
    return VK_SUCCESS;
 }
@@ -447,12 +451,8 @@ wrapper_DestroyBuffer(VkDevice _device,
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
 
-   simple_mtx_lock(&device->resource_mutex);
-
    struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, buffer);
    wrapper_buffer_destroy(device, wb, pAllocator);
-
-   simple_mtx_unlock(&device->resource_mutex);
 }
 
 static void 
@@ -462,11 +462,17 @@ wrapper_image_destroy(struct wrapper_device *device,
 {
    if (wi == NULL)
       return;
+
+   simple_mtx_lock(&device->resource_mutex);
       
    device->dispatch_table.DestroyImage(device->dispatch_handle,
       wi->dispatch_handle, pAllocator);
-   
+
+   _mesa_hash_table_u64_remove(device->image_table, (uint64_t)wi->dispatch_handle);
    list_del(&wi->link);
+
+   simple_mtx_unlock(&device->resource_mutex);
+   
    vk_object_free(&device->vk, &device->vk.alloc, wi);
 }
 
@@ -510,6 +516,7 @@ wrapper_CreateImage(VkDevice _device,
    wi->dispatch_handle = *pImage;
 
    list_add(&wi->link, &device->image_list);
+   _mesa_hash_table_u64_insert(device->image_table, (uint64_t)wi->dispatch_handle, wi);
 
    simple_mtx_unlock(&device->resource_mutex);
 
@@ -526,17 +533,7 @@ wrapper_CreateImageView(VkDevice _device,
    VkImageViewCreateInfo create_info = *pCreateInfo;
    VkResult result;
 
-   simple_mtx_lock(&device->resource_mutex);
-
-   struct wrapper_image *wi = get_wrapper_image_from_handle(device, pCreateInfo->image);
-
-   if (wi == NULL) {
-      WRAPPER_LOG(error, "Failed to query wrapper_image");
-      simple_mtx_unlock(&device->resource_mutex);
-      return VK_ERROR_INITIALIZATION_FAILED;
-   }
-
-   if (is_emulated_bcn(device->physical, wi->info.format)) {
+   if (is_emulated_bcn(device->physical, pCreateInfo->format)) {
       create_info.format = get_format_for_bcn(pCreateInfo->format);
    }
 
@@ -545,8 +542,6 @@ wrapper_CreateImageView(VkDevice _device,
 
    if (result != VK_SUCCESS)
    	  WRAPPER_LOG(error, "Failed to create image view, res %d", result);   	  
-
-   simple_mtx_unlock(&device->resource_mutex);
 
    return result;
 }
@@ -558,12 +553,8 @@ wrapper_DestroyImage(VkDevice _device,
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
 
-   simple_mtx_lock(&device->resource_mutex);
-
    struct wrapper_image *wi = get_wrapper_image_from_handle(device, image);
    wrapper_image_destroy(device, wi, pAllocator);
-
-   simple_mtx_unlock(&device->resource_mutex);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -678,8 +669,6 @@ wrapper_WaitForFences(VkDevice _device,
    if (res != VK_SUCCESS || device->physical->emulate_bcn < 2)
       return res;
 
-   simple_mtx_lock(&device->resource_mutex);
-
    list_for_each_entry_safe(struct wrapper_command_buffer, wcb,
                             &device->command_buffer_list, link)
    {
@@ -691,13 +680,11 @@ wrapper_WaitForFences(VkDevice _device,
                 VkDeviceMemory memory = wb->memory;
                 wrapper_buffer_destroy(device, wb, NULL);
                 device->dispatch_table.FreeMemory(device->dispatch_handle,
-                memory, NULL);
+                   memory, NULL);
              }
           }
        }
    }
-
-   simple_mtx_unlock(&device->resource_mutex);
 
    return res;
 }
@@ -840,7 +827,7 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
    VkResult res;
 
    struct wrapper_device *device = wcb->device;
-   struct wrapper_image *wi = get_wrapper_image_from_handle(device, dstImage);
+   struct wrapper_image *wi = get_wrapper_image_from_handle(device, dstImage);   
    struct wrapper_buffer *wb = get_wrapper_buffer_from_handle(device, srcBuffer);
    VkFormat format = wi->info.format;
    int texel_size = get_texel_size_for_format(get_format_for_bcn(format));
@@ -859,6 +846,7 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
          
       if (res != VK_SUCCESS) {
          WRAPPER_LOG(error, "Failed to map source buffer memory, res %d", res);
+         simple_mtx_unlock(&device->resource_mutex);
          return;
       }
 
@@ -867,13 +855,12 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
    
    for (int i = 0; i < regionCount; i++) {
       VkBufferImageCopy copy_region = pRegions[i];
-      VkBuffer stagingBuffer;
-      VkDeviceMemory stagingBufferMemory;
-      void *dstData;
-      
       int w = copy_region.imageExtent.width;
       int h = copy_region.imageExtent.height;
       int offset = copy_region.bufferOffset;
+
+      struct wrapper_buffer *staging_wb = vk_object_zalloc(&device->vk,
+         &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
 
       VkBufferCreateInfo buffer_create_info = {
          .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -884,10 +871,11 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
       };
 
       res = device->dispatch_table.CreateBuffer(device->dispatch_handle,
-         &buffer_create_info, NULL, &stagingBuffer);
+         &buffer_create_info, NULL, &staging_wb->dispatch_handle);
 
       if (res != VK_SUCCESS) {
          WRAPPER_LOG(error, "Failed to create staging buffer, res %d", res);
+         simple_mtx_unlock(&device->resource_mutex);
          return;
       }
 
@@ -899,44 +887,41 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
       };
 
       res = device->dispatch_table.AllocateMemory(device->dispatch_handle,
-         &allocate_info, NULL, &stagingBufferMemory);
+         &allocate_info, NULL, &staging_wb->memory);
 
       if (res != VK_SUCCESS) {
          WRAPPER_LOG(error, "Failed to allocate staging buffer memory, res %d", res);
+         simple_mtx_unlock(&device->resource_mutex);
          return;
       }
 
       res = device->dispatch_table.BindBufferMemory(device->dispatch_handle,
-         stagingBuffer, stagingBufferMemory, 0);
+         staging_wb->dispatch_handle, staging_wb->memory, 0);
 
       if (res != VK_SUCCESS) {
          WRAPPER_LOG(error, "Failed to bind staging buffer memory, res %d", res);
+         simple_mtx_unlock(&device->resource_mutex);
          return;
       }
 
       res = device->dispatch_table.MapMemory(device->dispatch_handle,
-         stagingBufferMemory, 0, w * h * texel_size, 0, &dstData);
+         staging_wb->memory, 0, w * h * texel_size, 0, &staging_wb->mapped_address);
 
       if (res != VK_SUCCESS) {
          WRAPPER_LOG(error, "Failed to map staging buffer memory, res %d", res);
+         simple_mtx_unlock(&device->resource_mutex);
          return;
       }
 
-      decompress_bcn_format(wb->mapped_address, dstData, w, h, format, offset);
+      decompress_bcn_format(wb->mapped_address, staging_wb->mapped_address, w, h, format, offset);
       
       copy_region.bufferOffset = 0;
       copy_region.bufferRowLength = 0;
       copy_region.bufferImageHeight = 0;
 
       device->dispatch_table.CmdCopyBufferToImage(wcb->dispatch_handle,
-         stagingBuffer, dstImage, dstLayout, 1, &copy_region);
+         staging_wb->dispatch_handle, dstImage, dstLayout, 1, &copy_region);
 
-      struct wrapper_buffer *staging_wb = vk_object_zalloc(&device->vk,
-         &device->vk.alloc, sizeof(struct wrapper_buffer), VK_OBJECT_TYPE_BUFFER);
-
-      staging_wb->dispatch_handle = stagingBuffer;
-      staging_wb->memory = stagingBufferMemory;
-      staging_wb->mapped_address = dstData;
       staging_wb->wcb = wcb;
       staging_wb->device = device;
 
@@ -1007,6 +992,9 @@ wrapper_DestroyDevice(VkDevice _device, const VkAllocationCallbacks* pAllocator)
                             &device->device_memory_list, link) {
       wrapper_device_memory_destroy(mem);
    }
+   
+   simple_mtx_unlock(&device->resource_mutex);
+   
    list_for_each_entry_safe(struct wrapper_buffer, wb,
                             &device->buffer_list, link) {
       wrapper_buffer_destroy(device, wb, pAllocator);
@@ -1015,8 +1003,6 @@ wrapper_DestroyDevice(VkDevice _device, const VkAllocationCallbacks* pAllocator)
                             &device->image_list, link) {
       wrapper_image_destroy(device, wi, pAllocator);
    }
-
-   simple_mtx_unlock(&device->resource_mutex);
 
    list_for_each_entry_safe(struct vk_queue, queue, &device->vk.queues, link) {
       vk_queue_finish(queue);
