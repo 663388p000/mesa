@@ -334,14 +334,27 @@ wrapper_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
                                     VkPhysicalDeviceProperties *pProperties)
 {
    char *device_name;
+   uint32_t device_id;
+   uint32_t vendor_id;
+   
    uint32_t api_version = parse_vk_version_from_env();
    
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    pdevice->dispatch_table.GetPhysicalDeviceProperties(
       pdevice->dispatch_handle, pProperties);
 
-   asprintf(&device_name, "Wrapper(%s)", pProperties->deviceName);
+   char *device_name_env = getenv("WRAPPER_DEVICE_NAME");
+   asprintf(&device_name, "Wrapper(%s)", (device_name_env) ? device_name_env : pProperties->deviceName);
    strcpy(pProperties->deviceName, device_name);
+
+   device_id = getenv("WRAPPER_DEVICE_ID") ? atoi(getenv("WRAPPER_DEVICE_ID")) : 0;
+   vendor_id = getenv("WRAPPER_VENDOR_ID") ? atoi(getenv("WRAPPER_VENDOR_ID")) : 0;
+
+   if (device_id > 0)
+      pProperties->deviceID = device_id;
+
+   if (vendor_id > 0)
+      pProperties->vendorID = vendor_id;
 
    if (api_version > 0)
       pProperties->apiVersion = api_version;
@@ -351,21 +364,33 @@ VKAPI_ATTR void VKAPI_CALL
 wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
                                      VkPhysicalDeviceProperties2* pProperties)
 {
+   uint32_t device_id;
+   uint32_t vendor_id;
    char *device_name;
    char *driver_info;
+   uint32_t driver_id;
+   
    uint32_t api_version = parse_vk_version_from_env();
    
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    pdevice->dispatch_table.GetPhysicalDeviceProperties2(
       pdevice->dispatch_handle, pProperties);
 
-   asprintf(&device_name, "Wrapper(%s)", pProperties->properties.deviceName);
+   char *device_name_env = getenv("WRAPPER_DEVICE_NAME");
+   asprintf(&device_name, "Wrapper(%s)", (device_name_env) ? device_name_env : pProperties->properties.deviceName);   
    strcpy(pProperties->properties.deviceName, device_name);
+
+   device_id = getenv("WRAPPER_DEVICE_ID") ? atoi(getenv("WRAPPER_DEVICE_ID")) : 0;
+   vendor_id = getenv("WRAPPER_VENDOR_ID") ? atoi(getenv("WRAPPER_VENDOR_ID")) : 0;
+   
+   if (device_id > 0)
+      pProperties->properties.deviceID = device_id;
+   
+   if (vendor_id > 0)
+      pProperties->properties.vendorID = vendor_id;
 
    if (api_version > 0)
       pProperties->properties.apiVersion = api_version;
-
-   uint32_t driver_id = pdevice->driver_properties.driverID;
 
    vk_foreach_struct(prop, pProperties->pNext) {
       switch (prop->sType) {
@@ -388,7 +413,7 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR:
       {
-         if (driver_id != VK_DRIVER_ID_QUALCOMM_PROPRIETARY)
+         if (pdevice->driver_properties.driverID != VK_DRIVER_ID_QUALCOMM_PROPRIETARY)
             break;
             
          VkPhysicalDeviceFloatControlsPropertiesKHR *float_prop =
@@ -417,7 +442,7 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
          VkPhysicalDeviceVulkan12Properties *vk12_prop =
               (VkPhysicalDeviceVulkan12Properties *)prop;
 
-         if (driver_id == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
+         if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
             vk12_prop->denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
             vk12_prop->roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
             vk12_prop->shaderDenormFlushToZeroFloat16 = false;
@@ -427,6 +452,11 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
             vk12_prop->shaderSignedZeroInfNanPreserveFloat16 = false;
             vk12_prop->shaderSignedZeroInfNanPreserveFloat32 = false;
          }
+
+         driver_id = getenv("WRAPPER_DRIVER_ID") ? atoi(getenv("WRAPPER_DRIVER_ID")) : 0;
+
+         if (driver_id > 0)
+         	vk12_prop->driverID = driver_id;
          
          asprintf(&driver_info, "%d.%d.%d", 
             VK_VERSION_MAJOR(pProperties->properties.driverVersion),
