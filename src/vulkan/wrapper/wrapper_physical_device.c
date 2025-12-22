@@ -704,7 +704,7 @@ wrapper_GetPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice,
       pdevice->dispatch_handle, pMemoryProperties);
 
    if (wrapper_vmem_max_size == -1)
-      wrapper_vmem_max_size = getenv("WRAPPER_VMEM_MAX_SIZE") ? atoi(getenv("WRAPPER_VMEM_MAX_SIZE")) : -1;
+      wrapper_vmem_max_size = getenv("WRAPPER_VMEM_MAX_SIZE") ? atoi(getenv("WRAPPER_VMEM_MAX_SIZE")) : 0;
 
    if (wrapper_vmem_max_size > 0)
       pMemoryProperties->memoryHeaps[0].size = (VkDeviceSize)wrapper_vmem_max_size * 1048576;   
@@ -722,7 +722,7 @@ wrapper_GetPhysicalDeviceMemoryProperties2(VkPhysicalDevice physicalDevice,
       pdevice->dispatch_handle, pMemoryProperties);
 
    if (wrapper_vmem_max_size == -1)
-      wrapper_vmem_max_size = getenv("WRAPPER_VMEM_MAX_SIZE") ? atoi(getenv("WRAPPER_VMEM_MAX_SIZE")) : -1;
+      wrapper_vmem_max_size = getenv("WRAPPER_VMEM_MAX_SIZE") ? atoi(getenv("WRAPPER_VMEM_MAX_SIZE")) : 0;
 
    if (wrapper_vmem_max_size > 0)
       pMemoryProperties->memoryProperties.memoryHeaps[0].size = (VkDeviceSize)wrapper_vmem_max_size * 1048576;
