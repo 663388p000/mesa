@@ -37,7 +37,7 @@ const struct vk_device_extension_table wrapper_filter_extensions =
    .EXT_image_compression_control_swapchain = true,
 };
 
-struct wrapper_buffer *
+static struct wrapper_buffer *
 get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer) {
    struct wrapper_buffer *wb = NULL;
 
@@ -48,7 +48,7 @@ get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer) {
    return wb;
 }
 
-struct wrapper_image *
+static struct wrapper_image *
 get_wrapper_image_from_handle(struct wrapper_device *device, VkImage image) {
    struct wrapper_image *wi = NULL;
    
@@ -57,6 +57,17 @@ get_wrapper_image_from_handle(struct wrapper_device *device, VkImage image) {
    simple_mtx_unlock(&device->resource_mutex);
    
    return wi;
+}
+
+static struct wrapper_fence *
+get_wrapper_fence_from_handle(struct wrapper_device *device, VkFence fence) {
+   struct wrapper_fence *wf = NULL;
+
+   simple_mtx_lock(&device->resource_mutex);
+   wf = _mesa_hash_table_u64_search(device->fence_table, (uint64_t) fence);
+   simple_mtx_unlock(&device->resource_mutex);
+
+   return wf;
 }
 
 static void
@@ -235,8 +246,10 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    list_inithead(&device->device_memory_list);
    list_inithead(&device->image_list);
    list_inithead(&device->buffer_list);
+   list_inithead(&device->fence_list);
    device->image_table = _mesa_hash_table_u64_create(NULL);
    device->buffer_table = _mesa_hash_table_u64_create(NULL);
+   device->fence_table = _mesa_hash_table_u64_create(NULL);
    
    simple_mtx_init(&device->resource_mutex, mtx_plain);
    device->physical = physical_device;
@@ -596,6 +609,8 @@ wrapper_QueueSubmit(VkQueue _queue, uint32_t submitCount,
    VkCommandBuffer *command_buffers;
    VkResult result;
 
+   struct wrapper_fence *wf = get_wrapper_fence_from_handle(queue->device, fence);
+
    for (int i = 0; i < submitCount; i++) {
       const VkSubmitInfo *submit_info = &pSubmits[i];
       command_buffers = malloc(sizeof(VkCommandBuffer) *
@@ -603,7 +618,7 @@ wrapper_QueueSubmit(VkQueue _queue, uint32_t submitCount,
       for (int j = 0; j < submit_info->commandBufferCount; j++) {
          VK_FROM_HANDLE(wrapper_command_buffer, wcb,
                         submit_info->pCommandBuffers[j]);
-         wcb->fence = fence;
+         wcb->fence = wf;
          command_buffers[j] = wcb->dispatch_handle;
          
       }
@@ -629,6 +644,8 @@ wrapper_QueueSubmit2(VkQueue _queue, uint32_t submitCount,
    VkCommandBufferSubmitInfo *command_buffers;
    VkResult result;
 
+   struct wrapper_fence *wf = get_wrapper_fence_from_handle(queue->device, fence);
+
    for (int i = 0; i < submitCount; i++) {
       const VkSubmitInfo2 *submit_info = &pSubmits[i];
       command_buffers = malloc(sizeof(VkCommandBufferSubmitInfo) *
@@ -636,7 +653,7 @@ wrapper_QueueSubmit2(VkQueue _queue, uint32_t submitCount,
       for (int j = 0; j < submit_info->commandBufferInfoCount; j++) {
          VK_FROM_HANDLE(wrapper_command_buffer, wcb,
                         submit_info->pCommandBufferInfos[j].commandBuffer);
-         wcb->fence = fence;
+         wcb->fence = wf;
          command_buffers[j] = pSubmits[i].pCommandBufferInfos[j];
          command_buffers[j].commandBuffer = wcb->dispatch_handle;
       }
@@ -651,6 +668,66 @@ wrapper_QueueSubmit2(VkQueue _queue, uint32_t submitCount,
       free((void *)wrapper_submits[i].pCommandBufferInfos);
 
    return result;
+}
+
+static void 
+wrapper_fence_destroy(struct wrapper_device *device,
+					  struct wrapper_fence *wf,
+					  const VkAllocationCallbacks *pAllocator)
+{
+   if (wf == NULL)
+      return;
+
+   simple_mtx_lock(&device->resource_mutex);
+
+   device->dispatch_table.DestroyFence(device->dispatch_handle,
+      wf->dispatch_handle, pAllocator); 
+
+   _mesa_hash_table_u64_remove(device->fence_table, (uint64_t)wf->dispatch_handle);
+   list_del(&wf->link);
+   
+   simple_mtx_unlock(&device->resource_mutex);
+   
+   vk_object_free(&device->vk, &device->vk.alloc, wf);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_CreateFence(VkDevice _device,
+					const VkFenceCreateInfo *pCreateInfo,
+					const VkAllocationCallbacks *pAllocator,
+					VkFence *pFence)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+
+   VkResult res = device->dispatch_table.CreateFence(device->dispatch_handle,
+      pCreateInfo, pAllocator, pFence);
+
+   if (res != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to create fence, res %d", res);
+      return res;
+   }
+
+   simple_mtx_lock(&device->resource_mutex);
+   
+   struct wrapper_fence *wf = vk_object_zalloc(&device->vk,
+      &device->vk.alloc, sizeof(struct wrapper_fence), VK_OBJECT_TYPE_FENCE);
+   if (!wf) {
+      WRAPPER_LOG(error, "Failed to allocate wrapper_fence");
+      simple_mtx_unlock(&device->resource_mutex);
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+
+   wf->device = device;
+   wf->dispatch_handle = *pFence;
+
+   list_inithead(&wf->staging_buffers_list);
+
+   list_add(&wf->link, &device->fence_list);
+   _mesa_hash_table_u64_insert(device->fence_table, (uint64_t)wf->dispatch_handle, wf);
+
+   simple_mtx_unlock(&device->resource_mutex);
+
+   return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL
@@ -669,24 +746,30 @@ wrapper_WaitForFences(VkDevice _device,
    if (res != VK_SUCCESS || device->physical->emulate_bcn < 2)
       return res;
 
-   list_for_each_entry_safe(struct wrapper_command_buffer, wcb,
-                            &device->command_buffer_list, link)
-   {
-       for (uint32_t i = 0; i < fenceCount; i++) {
-          if (wcb->fence == pFences[i]) {
-             list_for_each_entry_safe(struct wrapper_buffer, wb,
-                                      &wcb->staging_buffers_list, link)
-             {
-                VkDeviceMemory memory = wb->memory;
-                wrapper_buffer_destroy(device, wb, NULL);
-                device->dispatch_table.FreeMemory(device->dispatch_handle,
-                   memory, NULL);
-             }
-          }
-       }
+   for (uint32_t i = 0; i < fenceCount; i++) {
+      struct wrapper_fence *wf = get_wrapper_fence_from_handle(device, pFences[i]);
+      list_for_each_entry_safe(struct wrapper_buffer, wb,
+                               &wf->staging_buffers_list, link)
+      {
+         VkDeviceMemory memory = wb->memory;
+         wrapper_buffer_destroy(device, wb, NULL);
+         device->dispatch_table.FreeMemory(device->dispatch_handle,
+            memory, NULL);
+      }
    }
 
    return res;
+}
+
+VKAPI_ATTR void VKAPI_CALL
+wrapper_DestroyFence(VkDevice _device,
+					 VkFence fence,
+					 const VkAllocationCallbacks *pAllocator)
+{
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+
+   struct wrapper_fence *wf = get_wrapper_fence_from_handle(device, fence);
+   wrapper_fence_destroy(device, wf, pAllocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -750,8 +833,6 @@ wrapper_command_buffer_create(struct wrapper_device *device,
    wcb->pool = pool;
    wcb->dispatch_handle = dispatch_handle;
    list_add(&wcb->link, &device->command_buffer_list);
-
-   list_inithead(&wcb->staging_buffers_list);
 
    *pCommandBuffers = wrapper_command_buffer_to_handle(wcb);
 
@@ -925,7 +1006,8 @@ wrapper_CmdCopyBufferToImage(VkCommandBuffer commandBuffer,
       staging_wb->wcb = wcb;
       staging_wb->device = device;
 
-      list_add(&staging_wb->link, &wcb->staging_buffers_list);
+      if (wcb->fence)
+         list_add(&staging_wb->link, &wcb->fence->staging_buffers_list);
    }
 
    if (wb->is_mapped) {
@@ -1002,6 +1084,10 @@ wrapper_DestroyDevice(VkDevice _device, const VkAllocationCallbacks* pAllocator)
    list_for_each_entry_safe(struct wrapper_image, wi,
                             &device->image_list, link) {
       wrapper_image_destroy(device, wi, pAllocator);
+   }
+   list_for_each_entry_safe(struct wrapper_fence, wf,
+                            &device->fence_list, link) {
+      wrapper_fence_destroy(device, wf, pAllocator);
    }
 
    list_for_each_entry_safe(struct vk_queue, queue, &device->vk.queues, link) {
