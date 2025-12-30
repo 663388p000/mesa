@@ -98,6 +98,7 @@ static void init_debug_messenger(VkInstance instance)
 static void *get_vulkan_handle() 
 {
    char *path = getenv("ADRENOTOOLS_DRIVER_PATH");
+   char *redirect_dir = getenv("ADRENOTOOLS_REDIRECT_DIR");
    char *name = getenv("ADRENOTOOLS_DRIVER_NAME");
    char *hooks = getenv("ADRENOTOOLS_HOOKS_PATH");
 #ifdef __TERMUX__
@@ -117,7 +118,12 @@ static void *get_vulkan_handle()
       char *temp;
       asprintf(&temp, "%s%s", path, "temp");
       mkdir(temp, S_IRWXU | S_IRWXG);
-      return  adrenotools_open_libvulkan(RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, temp, hooks, path, name, NULL, NULL);
+
+      int flags = ADRENOTOOLS_DRIVER_CUSTOM;
+      if (redirect_dir)
+         flags |= ADRENOTOOLS_DRIVER_FILE_REDIRECT;
+         
+      return  adrenotools_open_libvulkan(RTLD_NOW, flags, temp, hooks, path, name, redirect_dir, NULL);
    }
    else
       return dlopen(DEFAULT_VULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
