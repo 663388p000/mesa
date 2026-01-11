@@ -191,6 +191,8 @@ static VkResult wrapper_vulkan_init()
       supported_instance_extensions->extensions[idx] = true;
    }
 
+   supported_instance_extensions->EXT_debug_utils = false;
+
    return VK_SUCCESS;
 }
 
