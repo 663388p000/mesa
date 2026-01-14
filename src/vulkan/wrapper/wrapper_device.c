@@ -795,7 +795,15 @@ wrapper_CreateShaderModule(VkDevice _device,
 						   VkShaderModule *pShaderModule)
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
+   static int wrapper_no_remove_clip_distance = -1;
+   static int wrapper_no_patch_OpConstComp = -1;
 
+   if (wrapper_no_remove_clip_distance == -1)
+      wrapper_no_remove_clip_distance = getenv("WRAPPER_NO_REMOVE_CLIP_DISTANCE") && atoi(getenv("WRAPPER_NO_REMOVE_CLIP_DISTANCE"));
+
+   if (wrapper_no_patch_OpConstComp == -1)
+      wrapper_no_patch_OpConstComp = getenv("WRAPPER_NO_PATCH_OPCONSTCOMP") && atoi(getenv("WRAPPER_NO_PATCH_OPCONSTCOMP"));
+      
    VkShaderModuleCreateInfo create_info = *pCreateInfo;
 
    simple_mtx_lock(&device->resource_mutex);
@@ -803,8 +811,8 @@ wrapper_CreateShaderModule(VkDevice _device,
    if (device->physical->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
       uint32_t *code = malloc(create_info.codeSize);
       memcpy(code, create_info.pCode, create_info.codeSize);
-      patch_OpConstantComposite_to_OpSpecConstantComposite(code, create_info.codeSize);
-      remove_ClipDistance(code, &create_info.codeSize);
+      if (!wrapper_no_patch_OpConstComp) patch_OpConstantComposite_to_OpSpecConstantComposite(code, create_info.codeSize);
+      if (!wrapper_no_remove_clip_distance) remove_ClipDistance(code, &create_info.codeSize);
       create_info.pCode = code;
    }
 
