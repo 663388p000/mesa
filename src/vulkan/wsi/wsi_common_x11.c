@@ -1776,6 +1776,10 @@ x11_acquire_next_image(struct wsi_swapchain *anv_chain,
       return result;
 
    assert(*image_index < chain->base.image_count);
+
+   if (chain->base.wsi->sw && !chain->has_mit_shm)
+      return result;
+      
    xcb_sync_await_fence(chain->conn, 1, &chain->images[*image_index].sync_fence);
 
    return result;
