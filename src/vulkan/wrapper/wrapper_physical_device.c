@@ -28,6 +28,21 @@ parse_vk_version_from_env()
    return apiVersion;
 }
 
+static char *
+get_driver_version(const uint32_t driverVersion)
+{
+	char *driver_version;
+	uint32_t major = 0, minor = 0, patch = 0;
+
+	major = VK_API_VERSION_MAJOR(driverVersion);
+	minor = VK_API_VERSION_MINOR(driverVersion);
+	patch = VK_API_VERSION_PATCH(driverVersion);
+
+	asprintf(&driver_version, "%d.%d.%d", major, minor, patch);
+
+	return driver_version;
+}
+
 static VkResult
 wrapper_setup_device_extensions(struct wrapper_physical_device *pdevice) {
    struct vk_device_extension_table *exts = &pdevice->vk.supported_extensions;
@@ -207,6 +222,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          
       pdevice->dispatch_table.GetPhysicalDeviceMemoryProperties(
          pdevice->dispatch_handle, &pdevice->memory_properties);
+
+     WRAPPER_LOG(info, "GPU Name: %s", pdevice->properties2.properties.deviceName);
+     WRAPPER_LOG(info, "Driver Version: %s", get_driver_version(pdevice->properties2.properties.driverVersion));
      
       const char *app_name = instance->vk.app_info.app_name
          ? instance->vk.app_info.app_name : "wrapper";
