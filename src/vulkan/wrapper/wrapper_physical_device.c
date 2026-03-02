@@ -108,8 +108,8 @@ wrapper_wsi_proc_addr(VkPhysicalDevice physicalDevice, const char *pName)
 VkResult enumerate_physical_device(struct vk_instance *_instance)
 {
    struct wrapper_instance *instance = (struct wrapper_instance *)_instance;
-   VkPhysicalDevice physical_devices[16];
-   uint32_t physical_device_count = 16;
+   VkPhysicalDevice *physical_devices;
+   uint32_t physical_device_count;
    static int wrapper_disable_placed = -1;
    static int wrapper_dmaheap_cached = -1;
    static int wrapper_disable_present_wait = -1;
@@ -117,11 +117,23 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
    VkResult result;
 
    result = instance->dispatch_table.EnumeratePhysicalDevices(
-      instance->dispatch_handle, &physical_device_count, physical_devices);
+      instance->dispatch_handle, &physical_device_count, NULL);
 
-   if (result != VK_SUCCESS)
+   if (result != VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to retrieve physical devices count, res %d", result);
       return result;
+   }
 
+   physical_devices = malloc(physical_device_count * sizeof(VkPhysicalDevice));
+
+   result = instance->dispatch_table.EnumeratePhysicalDevices(
+      instance->dispatch_handle, &physical_device_count, physical_devices);
+      
+   if (result!= VK_SUCCESS) {
+      WRAPPER_LOG(error, "Failed to enumerate physical devices, res %d", result);	
+      return result;
+   }
+   
    for (int i = 0; i < physical_device_count; i++) {
       PFN_vkGetInstanceProcAddr get_instance_proc_addr;
       struct wrapper_physical_device *pdevice;
