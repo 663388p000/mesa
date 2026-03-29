@@ -300,8 +300,9 @@ if (pdf2 && pdf2->features.f) { \
    DISABLE_FEATURE(shaderClipDistance);
    DISABLE_FEATURE(shaderCullDistance);
    DISABLE_FEATURE(dualSrcBlend);
+   DISABLE_FEATURE(multiDrawIndirect);
 
-#undef CHECK_FEATURE
+#undef DISABLE_FEATURE
 
    process_pnext_chain((VkBaseInStructure *)&wrapper_create_info, device->physical);
 

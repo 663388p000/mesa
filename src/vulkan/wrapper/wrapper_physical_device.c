@@ -276,6 +276,8 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             pdevice->vk.supported_extensions.EXT_robustness2 = true;
             WRAPPER_LOG(info, "Faking dualSrcBlend feature");
             supported_features->dualSrcBlend = true;
+         	WRAPPER_LOG(info, "Faking multiDrawIndirect feature");
+            supported_features->multiDrawIndirect = true;
          }
          WRAPPER_LOG(info, "Disabling VK_EXT_calibrated_timestamps");
          pdevice->vk.supported_extensions.EXT_calibrated_timestamps = false;
