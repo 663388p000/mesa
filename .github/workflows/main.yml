@@ -172,6 +172,7 @@ jobs:
             --strip \
             -Dprefix="$PREFIX" \
             -Dplatforms=x11 \
+            -Dglx=disabled \
             -Ddefault_library=shared \
             -Dvulkan-drivers= \
             -Dgallium-drivers=
