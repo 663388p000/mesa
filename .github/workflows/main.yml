@@ -1,4 +1,5 @@
 name: Build Mesa Vulkan Wrapper
+
 on:
   workflow_dispatch:
 
@@ -18,6 +19,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             python3 \
             python3-pip \
@@ -32,7 +34,8 @@ jobs:
             build-essential \
             ccache \
             unzip \
-            wget
+            wget \
+            file
 
       - name: Download Android NDK r27d
         run: |
@@ -45,38 +48,94 @@ jobs:
           echo "22105e410cf29afcf163760cc95522b9fb981121  android-ndk-r27d-linux.zip" \
             | sha1sum -c -
 
+      - name: Extract Android NDK
+        run: |
+          unzip -q android-ndk-r27d-linux.zip
+
+          test -d "$NDK_DIR"
+
+          echo "NDK:"
+          ls -la "$NDK_DIR"
+
       - name: Verify Android compiler
         run: |
-       export TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"       
-       "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
-       --version
-       "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++" \
-       --version
+          export TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+
+          test -x "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
+          test -x "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
+          test -x "$TOOLCHAIN/bin/llvm-ar"
+          test -x "$TOOLCHAIN/bin/llvm-strip"
+          test -x "$TOOLCHAIN/bin/ld.lld"
+
+          echo "===== clang ====="
+          "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
+            --version
+
+          echo
+          echo "===== clang++ ====="
+          "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++" \
+            --version
+
+          echo
+          echo "===== lld ====="
+          "$TOOLCHAIN/bin/ld.lld" \
+            --version
+
+      - name: Detect Mesa Vulkan wrapper option
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching Mesa source for Vulkan wrapper option..."
+
+          WRAPPER_OPTION=""
+
+          if grep -R \
+              -E "option\\(['\"][^'\"]*wrapper[^'\"]*['\"]" \
+              meson.options meson_options.txt 2>/dev/null; then
+
+            WRAPPER_OPTION="$(
+              grep -Rho \
+                -E "option\\(['\"][^'\"]*wrapper[^'\"]*['\"]" \
+                meson.options meson_options.txt 2>/dev/null \
+                | head -n1 \
+                | sed -E "s/option\\(['\"]([^'\"]+)['\"].*/\\1/"
+            )"
+          fi
+
+          if [ -z "$WRAPPER_OPTION" ]; then
+            echo "ERROR: Could not find Mesa Vulkan wrapper Meson option."
+            echo
+            echo "References to wrapper:"
+            grep -Rni \
+              -E "with_wrapper_vk|wrapper_vk|vulkan.*wrapper|wrapper.*vulkan" \
+              src/vulkan meson.options meson_options.txt 2>/dev/null \
+              | head -n 100 || true
+            exit 1
+          fi
+
+          echo "Detected wrapper option: $WRAPPER_OPTION"
+          echo "WRAPPER_OPTION=$WRAPPER_OPTION" >> "$GITHUB_ENV"
 
       - name: Create Android ARM64 cross file
+        shell: bash
         run: |
+          set -e
+
           mkdir -p .ci
 
           cat > .ci/android-aarch64.ini <<EOF
           [constants]
-          ndk_path = '$NDK_DIR'
-          toolchain = ndk_path / 'toolchains/llvm/prebuilt/linux-x86_64'
+          ndk = '${NDK_DIR}'
+          toolchain = ndk / 'toolchains/llvm/prebuilt/linux-x86_64'
 
           [binaries]
-          ar = toolchain / 'bin/aarch64-linux-android-ar'
-          c = [toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang']
-          cpp = [
-            toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang++',
-            '-fno-exceptions',
-            '-fno-unwind-tables',
-            '-fno-asynchronous-unwind-tables',
-            '--start-no-unused-arguments',
-            '-static-libstdc++',
-            '--end-no-unused-arguments'
-          ]
-          c_ld = 'lld'
-          cpp_ld = 'lld'
-          strip = toolchain / 'bin/aarch64-linux-android-strip'
+          c = toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang'
+          cpp = toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang++'
+          ar = toolchain / 'bin/llvm-ar'
+          strip = toolchain / 'bin/llvm-strip'
+          ranlib = toolchain / 'bin/llvm-ranlib'
+          ld = toolchain / 'bin/ld.lld'
 
           [host_machine]
           system = 'android'
@@ -85,8 +144,16 @@ jobs:
           endian = 'little'
           EOF
 
+          echo "===== Android cross file ====="
+          cat .ci/android-aarch64.ini
+
       - name: Setup Mesa
+        shell: bash
         run: |
+          set -e
+
+          echo "Vulkan wrapper option: $WRAPPER_OPTION"
+
           meson setup build \
             --cross-file .ci/android-aarch64.ini \
             --buildtype=release \
@@ -99,40 +166,109 @@ jobs:
             -Ddefault_library=shared \
             -Dvulkan-drivers= \
             -Dgallium-drivers= \
+            -D"${WRAPPER_OPTION}=enabled" \
             -Degl=disabled \
             -Dglx=disabled \
             -Dgbm=disabled \
-            -Dtests=false \
-            -Dinstall_mesa_clc=false \
-            -Dinstall_glx_indirect=false \
-            -Dbuild-tests=false
+            -Dtests=false
+
+      - name: Show Meson configuration
+        run: |
+          meson configure build
 
       - name: Build Mesa
         run: |
           ninja -C build -j$(nproc)
 
       - name: Show Vulkan outputs
+        shell: bash
         run: |
-          echo "=== Shared libraries ==="
-          find build -type f \
-            \( -name '*.so' -o -name '*.so.*' \) \
-            -print
+          echo "========================================"
+          echo "VULKAN BUILD OUTPUTS"
+          echo "========================================"
 
           echo
-          echo "=== Vulkan ==="
-          find build/src/vulkan -type f \
-            -print 2>/dev/null || true
+          echo "--- Shared libraries ---"
+          find build \
+            -type f \
+            \( -name '*.so' -o -name '*.so.*' \) \
+            -print \
+            | sort
 
-      - name: Collect artifacts
+          echo
+          echo "--- Vulkan directory ---"
+          find build/src/vulkan \
+            -type f \
+            -print \
+            2>/dev/null \
+            | sort || true
+
+          echo
+          echo "--- Wrapper directory ---"
+          find build/src/vulkan/wrapper \
+            -type f \
+            -print \
+            2>/dev/null \
+            | sort || true
+
+          echo
+          echo "--- Vulkan ICD JSON ---"
+          find build \
+            -type f \
+            -name '*.json' \
+            -print \
+            | sort
+
+      - name: Check ELF architecture
+        shell: bash
         run: |
+          set -e
+
+          echo "Checking generated shared libraries..."
+
+          find build \
+            -type f \
+            \( -name '*.so' -o -name '*.so.*' \) \
+            -print0 |
+          while IFS= read -r -d '' file; do
+            echo
+            echo "===== $file ====="
+            file "$file"
+          done
+
+      - name: Collect Vulkan artifacts
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf artifacts
           mkdir -p artifacts
 
-          find build -type f \
-            \( -name '*.so' -o -name '*.json' \) \
-            -exec cp --parents {} artifacts/ \; || true
+          # Shared libraries
+          find build \
+            -type f \
+            \( -name '*.so' -o -name '*.so.*' \) \
+            -exec cp --parents {} artifacts/ \;
 
-      - name: Upload Mesa artifacts
+          # Vulkan ICD JSON files
+          find build \
+            -type f \
+            -name '*.json' \
+            -exec cp --parents {} artifacts/ \;
+
+          echo
+          echo "========================================"
+          echo "ARTIFACTS"
+          echo "========================================"
+
+          find artifacts \
+            -type f \
+            -print \
+            | sort
+
+      - name: Upload Mesa Vulkan Wrapper
         uses: actions/upload-artifact@v4
         with:
-          name: mesa-android-arm64
+          name: mesa-vulkan-wrapper-android-arm64-r27d
           path: artifacts/
+          if-no-files-found: error
