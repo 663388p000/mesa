@@ -160,40 +160,40 @@ jobs:
           mkdir -p build
 
           cat > build/android-arm64.ini <<EOF
-[binaries]
-c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-ar = '$TOOLCHAIN/bin/llvm-ar'
-strip = '$TOOLCHAIN/bin/llvm-strip'
-pkg-config = '/usr/bin/pkg-config'
+          [binaries]
+          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+          ar = '$TOOLCHAIN/bin/llvm-ar'
+          strip = '$TOOLCHAIN/bin/llvm-strip'
+          pkg-config = '/usr/bin/pkg-config'
 
-[host_machine]
-system = 'android'
-cpu_family = 'aarch64'
-cpu = 'armv8'
-endian = 'little'
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8'
+          endian = 'little'
 
-[built-in options]
-c_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-I$ROOT/usr/include'
-]
+          [built-in options]
+          c_args = [
+          '--sysroot=$TOOLCHAIN/sysroot',
+          '-I$ROOT/usr/include'
+          ]
 
-cpp_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-I$ROOT/usr/include'
-]
+          cpp_args = [
+          '--sysroot=$TOOLCHAIN/sysroot',
+          '-I$ROOT/usr/include'
+          ]
 
-c_link_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-L$ROOT/usr/lib'
-]
+          c_link_args = [
+          '--sysroot=$TOOLCHAIN/sysroot',
+          '-L$ROOT/usr/lib'
+          ]
 
-cpp_link_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-L$ROOT/usr/lib'
-]
-EOF
+          cpp_link_args = [
+          '--sysroot=$TOOLCHAIN/sysroot',
+          '-L$ROOT/usr/lib'
+          ]
+          EOF
 
       - name: Configure Mesa
         env:
