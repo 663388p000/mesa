@@ -1,4 +1,4 @@
-name: Build Mesa Vulkan Wrapper - Android ARM64 X11
+name: Build Vulkan Wrapper - Android ARM64 X11
 
 on:
   workflow_dispatch:
@@ -9,17 +9,14 @@ jobs:
 
     env:
       NDK_VERSION: r27d
-      NDK_DIR: ${{ github.workspace }}/android-ndk-r27d
       ANDROID_API: 34
-      PREFIX: ${{ github.workspace }}/sysroot
+      NDK_DIR: ${{ github.workspace }}/android-ndk-r27d
+      PREFIX: ${{ github.workspace }}/android-sysroot
 
     steps:
-      - name: Checkout Mesa
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------
-      # Host tools
-      # ------------------------------------------------------------
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -39,24 +36,17 @@ jobs:
             ccache \
             unzip \
             wget \
+            git \
             autoconf \
             automake \
             libtool \
-            xorgproto \
-            xtrans \
-            libx11-dev \
-            libxext-dev \
-            libxrandr-dev \
-            libxcb1-dev \
-            libxcb-randr0-dev \
-            libxcb-sync-dev \
-            libxcb-xfixes0-dev \
-            libxcb-present-dev
+            xorgproto
 
       # ------------------------------------------------------------
-      # Android NDK r27d
+      # Android NDK
       # ------------------------------------------------------------
-      - name: Download Android NDK r27d
+
+      - name: Download Android NDK
         run: |
           wget -q \
             https://dl.google.com/android/repository/android-ndk-r27d-linux.zip \
@@ -75,14 +65,15 @@ jobs:
           test -d "$NDK_DIR"
 
           echo "NDK:"
-          "$NDK_DIR/ndk-build" --version || true
+          "$NDK_DIR/ndk-build" --version
 
       # ------------------------------------------------------------
-      # Android compiler
+      # Android ARM64 compiler
       # ------------------------------------------------------------
-      - name: Verify Android ARM64 compiler
+
+      - name: Verify Android ARM64 toolchain
         run: |
-          export TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+          TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
 
           test -x \
             "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
@@ -91,7 +82,6 @@ jobs:
             "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
 
           test -x "$TOOLCHAIN/bin/llvm-ar"
-          test -x "$TOOLCHAIN/bin/llvm-ranlib"
           test -x "$TOOLCHAIN/bin/llvm-strip"
           test -x "$TOOLCHAIN/bin/ld.lld"
 
@@ -101,66 +91,55 @@ jobs:
           "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++" \
             --version
 
+          "$TOOLCHAIN/bin/ld.lld" --version
+
       # ------------------------------------------------------------
-      # Target sysroot
-      #
-      # IMPORTANT:
-      # Android NDK does not contain X11.
-      #
-      # This sysroot is reserved for ARM64 X11/XCB dependencies.
+      # Force-enable wrapper
       # ------------------------------------------------------------
-      - name: Prepare ARM64 target sysroot
+
+      - name: Enable Mesa Vulkan wrapper
         run: |
-          mkdir -p "$PREFIX"
+          python3 <<'PY'
+          from pathlib import Path
 
-          mkdir -p \
-            "$PREFIX/include" \
-            "$PREFIX/lib" \
-            "$PREFIX/share"
+          p = Path("src/vulkan/meson.build")
+          s = p.read_text()
 
-          echo "Target prefix:"
-          echo "$PREFIX"
+          marker = "vk_api_xml = files('registry/vk.xml')"
 
-      # ------------------------------------------------------------
-      # Inspect wrapper configuration
-      # ------------------------------------------------------------
-      - name: Inspect Vulkan wrapper
-        run: |
-          echo "=== Wrapper files ==="
-          find src/vulkan/wrapper -maxdepth 2 -type f -print
+          if "with_wrapper_vk = true" not in s:
+              if marker not in s:
+                  raise SystemExit(
+                      "Could not find src/vulkan/meson.build insertion point"
+                  )
 
-          echo
-          echo "=== with_wrapper_vk ==="
-          grep -Rni \
-            "with_wrapper_vk" \
-            src/vulkan \
-            meson.build \
-            meson_options.txt \
-            meson.options \
-            2>/dev/null || true
+              s = s.replace(
+                  marker,
+                  "# CI: force-enable Vulkan wrapper\n"
+                  "with_wrapper_vk = true\n\n"
+                  + marker,
+                  1,
+              )
 
-          echo
-          echo "=== XCB/Xlib ==="
-          grep -RniE \
-            "DVK_USE_PLATFORM_(XCB|XLIB)_KHR|VK_USE_PLATFORM_(XCB|XLIB)_KHR" \
-            src/vulkan \
-            2>/dev/null || true
+              p.write_text(s)
+
+          print("with_wrapper_vk forced to true")
+          PY
+
+          grep -n "with_wrapper_vk" src/vulkan/meson.build
 
       # ------------------------------------------------------------
       # Meson cross file
-      #
-      # Target is Android ARM64.
-      # X11/XCB are explicitly requested through compiler defines.
       # ------------------------------------------------------------
-      - name: Create Android ARM64 X11 cross file
+
+      - name: Create Android ARM64 cross file
         run: |
           mkdir -p .ci
 
-          cat > .ci/android-aarch64-x11.ini <<EOF
+          cat > .ci/android-aarch64.ini <<EOF
           [constants]
           ndk = '${NDK_DIR}'
           toolchain = ndk / 'toolchains/llvm/prebuilt/linux-x86_64'
-          target_prefix = '${PREFIX}'
 
           [binaries]
           c = toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang'
@@ -169,32 +148,6 @@ jobs:
           ranlib = toolchain / 'bin/llvm-ranlib'
           strip = toolchain / 'bin/llvm-strip'
           ld = toolchain / 'bin/ld.lld'
-          pkg-config = '/usr/bin/pkg-config'
-
-          [built-in options]
-          c_args = [
-            '-DVK_USE_PLATFORM_XCB_KHR',
-            '-DVK_USE_PLATFORM_XLIB_KHR',
-            '-DDVK_USE_PLATFORM_XCB_KHR',
-            '-DDVK_USE_PLATFORM_XLIB_KHR',
-            '-I${PREFIX}/include'
-          ]
-
-          cpp_args = [
-            '-DVK_USE_PLATFORM_XCB_KHR',
-            '-DVK_USE_PLATFORM_XLIB_KHR',
-            '-DDVK_USE_PLATFORM_XCB_KHR',
-            '-DDVK_USE_PLATFORM_XLIB_KHR',
-            '-I${PREFIX}/include'
-          ]
-
-          c_link_args = [
-            '-L${PREFIX}/lib'
-          ]
-
-          cpp_link_args = [
-            '-L${PREFIX}/lib'
-          ]
 
           [host_machine]
           system = 'android'
@@ -203,25 +156,20 @@ jobs:
           endian = 'little'
           EOF
 
-          cat .ci/android-aarch64-x11.ini
+          cat .ci/android-aarch64.ini
 
       # ------------------------------------------------------------
-      # Configure Mesa
-      #
-      # NO:
-      #   -Dplatforms=android
-      #
-      # We want the Linux/X11 code path compiled with Android clang.
+      # Mesa configuration
       # ------------------------------------------------------------
+
       - name: Configure Mesa
         run: |
-          rm -rf build
-
           meson setup build \
-            --cross-file .ci/android-aarch64-x11.ini \
+            --cross-file .ci/android-aarch64.ini \
             --buildtype=release \
             --strip \
-            -Dprefix=/usr \
+            -Dprefix="$PREFIX" \
+            -Dplatforms=x11 \
             -Ddefault_library=shared \
             -Dvulkan-drivers= \
             -Dgallium-drivers= \
@@ -229,87 +177,88 @@ jobs:
             -Dglx=disabled \
             -Dgbm=disabled \
             -Dtests=false \
-            -Dbuild-tests=false \
             -Dinstall_mesa_clc=false \
             -Dinstall_glx_indirect=false
 
       # ------------------------------------------------------------
       # Build
       # ------------------------------------------------------------
-      - name: Build Mesa
+
+      - name: Build
         run: |
           ninja -C build -j"$(nproc)"
 
       # ------------------------------------------------------------
-      # Inspect binaries
+      # Find wrapper
       # ------------------------------------------------------------
-      - name: Inspect generated libraries
-        run: |
-          echo "=== Shared libraries ==="
 
-          find build \
-            -type f \
-            \( -name '*.so' -o -name '*.so.*' \) \
+      - name: Locate Vulkan wrapper
+        run: |
+          echo "=== Wrapper ==="
+
+          find build -type f \
+            \( \
+              -name 'libvulkan_wrapper.so' \
+              -o \
+              -name '*vulkan_wrapper*.so*' \
+            \) \
             -print
 
           echo
-          echo "=== Vulkan wrapper ==="
+          echo "=== Vulkan build outputs ==="
 
-          find build \
+          find build/src/vulkan \
             -type f \
-            \( \
-              -name 'libvulkan_wrapper.so' \
-              -o -name '*vulkan*wrapper*.so' \
-              -o -name '*wrapper*.json' \
-              -o -name '*vulkan*.json' \
-            \) \
-            -print
+            -print \
+            2>/dev/null || true
 
       # ------------------------------------------------------------
       # Verify architecture
       # ------------------------------------------------------------
-      - name: Verify ARM64 output
-        run: |
-          echo "=== ELF architecture ==="
 
-          find build \
-            -type f \
-            -name '*.so*' \
-            -print0 |
-          while IFS= read -r -d '' f; do
-            echo
-            echo ">>> $f"
-            file "$f"
-          done
+      - name: Verify output architecture
+        run: |
+          WRAPPER="$(find build -type f \
+            -name 'libvulkan_wrapper.so' \
+            | head -n 1)"
+
+          if [ -z "$WRAPPER" ]; then
+            echo "ERROR: libvulkan_wrapper.so was not produced"
+            exit 1
+          fi
+
+          echo "Wrapper: $WRAPPER"
+
+          file "$WRAPPER"
+
+          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+            -h "$WRAPPER" | grep -E \
+              'Class:|Machine:|OS/ABI:'
 
       # ------------------------------------------------------------
-      # Collect
+      # Package
       # ------------------------------------------------------------
-      - name: Collect artifacts
+
+      - name: Package wrapper
         run: |
-          rm -rf artifacts
           mkdir -p artifacts
 
-          find build \
-            -type f \
-            \( \
-              -name 'libvulkan_wrapper.so' \
-              -o -name '*.so' \
-              -o -name '*.so.*' \
-              -o -name '*.json' \
-            \) \
-            -exec cp --parents {} artifacts/ \; || true
+          WRAPPER="$(find build -type f \
+            -name 'libvulkan_wrapper.so' \
+            | head -n 1)"
 
-          echo
-          echo "=== Artifacts ==="
-          find artifacts -type f -print
+          if [ -z "$WRAPPER" ]; then
+            echo "ERROR: wrapper library not found"
+            exit 1
+          fi
 
-      # ------------------------------------------------------------
-      # Upload
-      # ------------------------------------------------------------
-      - name: Upload Mesa Android ARM64 X11 Wrapper
+          cp "$WRAPPER" artifacts/libvulkan_wrapper.so
+
+          echo "=== Artifact ==="
+          ls -lh artifacts/
+
+      - name: Upload wrapper
         uses: actions/upload-artifact@v4
         with:
-          name: mesa-vulkan-wrapper-android-arm64-x11
-          path: artifacts/
-          if-no-files-found: error
+          name: vulkan-wrapper-android-arm64-x11
+          path: artifacts/libvulkan_wrapper.so
