@@ -82,41 +82,45 @@ jobs:
             --version
 
       - name: Detect Mesa Vulkan wrapper option
+            
         shell: bash
         run: |
           set -e
 
-          echo "Searching Mesa source for Vulkan wrapper option..."
+          echo "========================================"
+          echo "Searching Vulkan Wrapper configuration"
+          echo "========================================"
 
-          WRAPPER_OPTION=""
+          echo
+          echo "--- with_wrapper_vk references ---"
+          grep -Rni \
+            "with_wrapper_vk" \
+            meson.build \
+            meson_options.txt \
+            meson.options \
+            src \
+            2>/dev/null || true
 
-          if grep -R \
-              -E "option\\(['\"][^'\"]*wrapper[^'\"]*['\"]" \
-              meson.options meson_options.txt 2>/dev/null; then
+          echo
+          echo "--- wrapper source ---"
+          ls -la src/vulkan/wrapper/
 
-            WRAPPER_OPTION="$(
-              grep -Rho \
-                -E "option\\(['\"][^'\"]*wrapper[^'\"]*['\"]" \
-                meson.options meson_options.txt 2>/dev/null \
-                | head -n1 \
-                | sed -E "s/option\\(['\"]([^'\"]+)['\"].*/\\1/"
-            )"
-          fi
+          echo
+          echo "--- wrapper meson.build ---"
+          sed -n '1,180p' src/vulkan/wrapper/meson.build
 
-          if [ -z "$WRAPPER_OPTION" ]; then
-            echo "ERROR: Could not find Mesa Vulkan wrapper Meson option."
-            echo
-            echo "References to wrapper:"
-            grep -Rni \
-              -E "with_wrapper_vk|wrapper_vk|vulkan.*wrapper|wrapper.*vulkan" \
-              src/vulkan meson.options meson_options.txt 2>/dev/null \
-              | head -n 100 || true
-            exit 1
-          fi
+          echo
+          echo "--- Vulkan meson.build ---"
+          sed -n '1,130p' src/vulkan/meson.build
 
-          echo "Detected wrapper option: $WRAPPER_OPTION"
-          echo "WRAPPER_OPTION=$WRAPPER_OPTION" >> "$GITHUB_ENV"
-
+          echo
+          echo "--- Meson options containing Vulkan/wrapper ---"
+          grep -RniE \
+            "vulkan|wrapper" \
+            meson_options.txt \
+            meson.options \
+            2>/dev/null || true
+            
       - name: Create Android ARM64 cross file
         shell: bash
         run: |
