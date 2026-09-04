@@ -40,6 +40,17 @@ jobs:
 
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
           rm -rf "$NDK.tmp" ndk.zip
+      
+      - name: Test Termux repository
+        run: |
+          set -eux
+
+          curl -4 -fL --retry 5 --retry-all-errors \
+            -A "Mozilla/5.0" \
+            "https://packages-cf.termux.dev:443/apt/termux-main/dists/stable/Release" \
+            -o /tmp/Release
+
+          cat /tmp/Release
 
       - name: Download X11 libraries
         run: |
