@@ -1,4 +1,4 @@
-name: Build Mesa Vulkan Wrapper - Android ARM64 X11
+name: Mesa Vulkan Wrapper ARM64 X11
 
 on:
   workflow_dispatch:
@@ -8,631 +8,147 @@ jobs:
     runs-on: ubuntu-24.04
 
     env:
-      NDK_VERSION: r27d
-      ANDROID_API: "34"
-      NDK_DIR: ${{ github.workspace }}/android-ndk
-      TERMUX_ROOT: ${{ github.workspace }}/termux-root
-      TERMUX_CACHE: ${{ github.workspace }}/termux-cache
+      NDK: ${{ github.workspace }}/android-ndk
+      ROOT: ${{ github.workspace }}/termux-root
 
     steps:
-      # ------------------------------------------------------------
-      # Checkout
-      # ------------------------------------------------------------
-
-      - name: Checkout Mesa
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # ------------------------------------------------------------
-      # Host dependencies
-      # ------------------------------------------------------------
-
-      - name: Install host dependencies
-        shell: bash
+      - name: Install dependencies
         run: |
-          set -euo pipefail
-
           sudo apt-get update
+          sudo apt-get install -y meson ninja-build pkg-config python3 python3-mako bison flex gettext cmake curl wget xz-utils zstd unzip binutils
 
-          sudo apt-get install -y \
-            git \
-            meson \
-            ninja-build \
-            pkg-config \
-            python3 \
-            python3-pip \
-            python3-mako \
-            bison \
-            flex \
-            gettext \
-            cmake \
-            curl \
-            wget \
-            xz-utils \
-            zstd \
-            unzip \
-            binutils \
-            ca-certificates
-
-      # ------------------------------------------------------------
-      # Android NDK
-      # ------------------------------------------------------------
-
-      - name: Download Android NDK
-        shell: bash
+      - name: Download NDK
         run: |
-          set -euo pipefail
+          wget -q --show-progress https://dl.google.com/android/repository/android-ndk-r27d-linux.zip -O ndk.zip
+          rm -rf "$NDK" "$NDK.tmp"
+          mkdir "$NDK.tmp"
+          unzip -q ndk.zip -d "$NDK.tmp"
+          mv "$NDK.tmp/android-ndk-r27d" "$NDK"
+          rm -rf "$NDK.tmp" ndk.zip
 
-          NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
-
-          rm -rf \
-            "$NDK_DIR" \
-            "$NDK_DIR.tmp" \
-            ndk.zip
-
-          echo "Downloading:"
-          echo "$NDK_URL"
-
-          wget \
-            --no-verbose \
-            --show-progress \
-            "$NDK_URL" \
-            -O ndk.zip
-
-          mkdir -p "$NDK_DIR.tmp"
-
-          unzip -q \
-            ndk.zip \
-            -d "$NDK_DIR.tmp"
-
-          NDK_EXTRACTED="$NDK_DIR.tmp/android-ndk-${NDK_VERSION}"
-
-          if [ ! -d "$NDK_EXTRACTED" ]; then
-            echo "ERROR: extracted NDK directory not found"
-            find "$NDK_DIR.tmp" -maxdepth 2 -type d -print
-            exit 1
-          fi
-
-          mv \
-            "$NDK_EXTRACTED" \
-            "$NDK_DIR"
-
-          rm -rf \
-            "$NDK_DIR.tmp" \
-            ndk.zip
-
-          TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
-          BIN="$TOOLCHAIN/bin"
-
-          echo
-          echo "NDK:"
-          echo "$NDK_DIR"
-
-          echo
-          echo "Toolchain:"
-          echo "$TOOLCHAIN"
-
-          test -d "$TOOLCHAIN"
-
-          test -x "$BIN/aarch64-linux-android34-clang"
-          test -x "$BIN/aarch64-linux-android34-clang++"
-          test -x "$BIN/llvm-ar"
-          test -x "$BIN/llvm-ranlib"
-          test -x "$BIN/llvm-strip"
-          test -x "$BIN/llvm-readelf"
-          test -x "$BIN/ld.lld"
-
-          echo
-          echo "=== Android clang ==="
-
-          "$BIN/aarch64-linux-android34-clang" \
-            --version
-
-      # ------------------------------------------------------------
-      # Download Termux ARM64/Bionic X11 packages
-      # ------------------------------------------------------------
-
-      - name: Download ARM64/Bionic X11 dependencies
-        shell: bash
+      - name: Download X11 libraries
         run: |
-          set -euo pipefail
+          set -e
 
-          ROOT="$TERMUX_ROOT"
-          CACHE="$TERMUX_CACHE"
+          MAIN="https://packages-cf.termux.dev/apt/termux-main"
+          X11="https://packages-cf.termux.dev/apt/termux-x11"
+          CACHE="$RUNNER_TEMP/termux"
+          mkdir -p "$ROOT" "$CACHE"
 
-          MAIN_REPO="https://packages-cf.termux.dev/apt/termux-main"
-          X11_REPO="https://packages-cf.termux.dev/apt/termux-x11"
+          curl -fsSL "$MAIN/dists/stable/main/binary-aarch64/Packages.gz" |
+            gzip -d > "$CACHE/main"
 
-          rm -rf \
-            "$ROOT" \
-            "$CACHE"
+          curl -fsSL "$X11/dists/x11/main/binary-aarch64/Packages.gz" |
+            gzip -d > "$CACHE/x11"
 
-          mkdir -p \
-            "$ROOT" \
-            "$CACHE/index" \
-            "$CACHE/deb"
+          python3 - "$CACHE" "$ROOT" "$MAIN" "$X11" <<'PY'
+          import os
+          import sys
+          import subprocess
+          import urllib.request
 
-          # These packages provide the X11/XCB development headers,
-          # pkg-config files and ARM64/Bionic libraries required by
-          # Mesa's X11 Vulkan WSI.
-          #
-          # xorgproto and xcb-proto are Architecture: all.
+          cache, root, main, x11 = sys.argv[1:]
 
-          PACKAGES="
-          libandroid-support
-          libxau
-          libxdmcp
-          libxcb
-          libx11
-          libxext
-          libxfixes
-          libxrandr
-          libxrender
-          libxshmfence
-          xorgproto
-          xcb-proto
-          "
+          packages = [
+              "libandroid-support",
+              "libxau",
+              "libxdmcp",
+              "libxcb",
+              "libx11",
+              "libxext",
+              "libxfixes",
+              "libxrandr",
+              "libxrender",
+              "libxshmfence",
+              "xorgproto",
+              "xcb-proto",
+          ]
 
-          # ----------------------------------------------------------
-          # Download repository index
-          # ----------------------------------------------------------
+          repos = [
+              (main, f"{cache}/main"),
+              (x11, f"{cache}/x11"),
+          ]
 
-          download_index() {
-            local repo="$1"
-            local suite="$2"
-            local output="$3"
+          os.makedirs(f"{cache}/deb", exist_ok=True)
 
-            local url
-            local suffix
+          for package in packages:
+              found = False
 
-            rm -f \
-              "$output" \
-              "${output}.txt"
+              for repo, index in repos:
+                  data = open(index, errors="ignore").read()
 
-            for suffix in Packages.xz Packages.gz Packages; do
-              url="${repo%/}/dists/${suite}/main/binary-aarch64/${suffix}"
+                  for stanza in data.split("\n\n"):
+                      fields = {}
 
-              echo
-              echo "Trying:"
-              echo "$url"
+                      for line in stanza.splitlines():
+                          if ": " in line:
+                              key, value = line.split(": ", 1)
+                              fields[key] = value.strip()
 
-              if curl \
-                --fail \
-                --location \
-                --silent \
-                --show-error \
-                --retry 5 \
-                --retry-delay 2 \
-                "$url" \
-                -o "$output"; then
+                      if fields.get("Package") != package:
+                          continue
 
-                case "$suffix" in
-                  Packages.xz)
-                    xz -dc \
-                      "$output" \
-                      > "${output}.txt"
-                    ;;
+                      if fields.get("Architecture") not in ("aarch64", "all"):
+                          continue
 
-                  Packages.gz)
-                    gzip -dc \
-                      "$output" \
-                      > "${output}.txt"
-                    ;;
+                      filename = fields.get("Filename")
+                      if not filename:
+                          continue
 
-                  Packages)
-                    cp \
-                      "$output" \
-                      "${output}.txt"
-                    ;;
-                esac
+                      url = f"{repo}/{filename}"
+                      deb = f"{cache}/deb/{os.path.basename(filename)}"
 
-                echo
-                echo "Downloaded package index:"
-                echo "$url"
+                      print(f"Downloading {package}")
+                      urllib.request.urlretrieve(url, deb)
 
-                return 0
-              fi
-            done
+                      subprocess.run(
+                          ["ar", "x", deb, "--output", f"{cache}/extract"],
+                          check=True,
+                      )
 
-            echo
-            echo "ERROR: could not download package index"
-            echo "Repository: $repo"
-            echo "Suite: $suite"
+                      break
 
-            exit 1
-          }
+                  else:
+                      continue
 
-          download_index \
-            "$MAIN_REPO" \
-            "stable" \
-            "$CACHE/index/main"
+                  found = True
+                  break
 
-          download_index \
-            "$X11_REPO" \
-            "x11" \
-            "$CACHE/index/x11"
+              if not found:
+                  raise SystemExit(f"Package not found: {package}")
+          PY
 
-          MAIN_INDEX="$CACHE/index/main.txt"
-          X11_INDEX="$CACHE/index/x11.txt"
-
-          test -s "$MAIN_INDEX"
-          test -s "$X11_INDEX"
-
-          # ----------------------------------------------------------
-          # Package lookup
-          #
-          # Python is used instead of awk because Debian/Termux
-          # Packages files contain multiline records and we also
-          # need to accept Architecture: all.
-          # ----------------------------------------------------------
-
-          find_package() {
-            local package="$1"
-            local index="$2"
-
-            python3 - "$package" "$index" <<'PY'
-import sys
-
-package = sys.argv[1]
-index = sys.argv[2]
-
-with open(index, "r", encoding="utf-8", errors="replace") as f:
-    data = f.read()
-
-for stanza in data.split("\n\n"):
-    fields = {}
-
-    for line in stanza.splitlines():
-        if ": " in line:
-            key, value = line.split(": ", 1)
-            fields[key] = value.strip()
-
-    if fields.get("Package") != package:
-        continue
-
-    architecture = fields.get("Architecture", "")
-    filename = fields.get("Filename", "")
-
-    if architecture in ("aarch64", "all") and filename:
-        print(filename)
-        sys.exit(0)
-
-sys.exit(1)
-PY
-          }
-
-          # ----------------------------------------------------------
-          # Download one package
-          # ----------------------------------------------------------
-
-          download_package() {
-            local package="$1"
-
-            local filename=""
-            local repo=""
-            local index=""
-
-            # Main repository first.
-            if filename="$(find_package "$package" "$MAIN_INDEX")"; then
-              repo="$MAIN_REPO"
-              index="$MAIN_INDEX"
-            else
-              # Then X11 repository.
-              if filename="$(find_package "$package" "$X11_INDEX")"; then
-                repo="$X11_REPO"
-                index="$X11_INDEX"
-              else
-                echo
-                echo "ERROR: package not found: $package"
-                echo
-                echo "Main index:"
-                grep \
-                  -A15 \
-                  -B2 \
-                  -m1 \
-                  "^Package: ${package}$" \
-                  "$MAIN_INDEX" \
-                  || true
-
-                echo
-                echo "X11 index:"
-                grep \
-                  -A15 \
-                  -B2 \
-                  -m1 \
-                  "^Package: ${package}$" \
-                  "$X11_INDEX" \
-                  || true
-
-                exit 1
-              fi
-            fi
-
-            local url="${repo%/}/${filename}"
-            local output="$CACHE/deb/$(basename "$filename")"
-
-            echo
-            echo "=========================================="
-            echo "Package     : $package"
-            echo "Repository  : $repo"
-            echo "Filename    : $filename"
-            echo "URL         : $url"
-            echo "=========================================="
-
-            curl \
-              --fail \
-              --location \
-              --retry 5 \
-              --retry-delay 2 \
-              "$url" \
-              -o "$output"
-
-            test -s "$output"
-          }
-
-          # ----------------------------------------------------------
-          # Download packages
-          # ----------------------------------------------------------
-
-          for package in $PACKAGES; do
-            download_package "$package"
-          done
-
-          echo
-          echo "=========================================="
-          echo "Downloaded Termux packages"
-          echo "=========================================="
-
-          ls -lh \
-            "$CACHE/deb"
-
-      # ------------------------------------------------------------
-      # Extract .deb packages
-      # ------------------------------------------------------------
-
-      - name: Extract Termux ARM64 packages
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ROOT="$TERMUX_ROOT"
-          CACHE="$TERMUX_CACHE"
-
-          mkdir -p "$ROOT"
+          mkdir -p "$CACHE/extract"
 
           for deb in "$CACHE"/deb/*.deb; do
-            echo
-            echo "=========================================="
-            echo "Extracting:"
-            echo "$(basename "$deb")"
-            echo "=========================================="
-
-            TMP="$ROOT/.deb-extract"
-
-            rm -rf "$TMP"
-            mkdir -p "$TMP"
-
-            ar x \
-              "$deb" \
-              --output "$TMP"
-
-            DATA_ARCHIVE=""
-
-            if [ -f "$TMP/data.tar.xz" ]; then
-              DATA_ARCHIVE="$TMP/data.tar.xz"
-
-            elif [ -f "$TMP/data.tar.zst" ]; then
-              DATA_ARCHIVE="$TMP/data.tar.zst"
-
-            elif [ -f "$TMP/data.tar.gz" ]; then
-              DATA_ARCHIVE="$TMP/data.tar.gz"
-            fi
-
-            if [ -z "$DATA_ARCHIVE" ]; then
-              echo "ERROR: data archive not found"
-              ls -la "$TMP"
-              exit 1
-            fi
-
-            tar \
-              -xf "$DATA_ARCHIVE" \
-              -C "$ROOT"
-
-            rm -rf "$TMP"
+            rm -rf "$CACHE/extract"
+            mkdir -p "$CACHE/extract"
+            ar x "$deb" --output "$CACHE/extract"
+            tar -xf "$CACHE/extract"/data.tar.* -C "$ROOT"
           done
 
-          rm -rf "$ROOT/.deb-extract"
-
-          echo
-          echo "=========================================="
-          echo "Extracted libraries"
-          echo "=========================================="
-
-          find "$ROOT/usr/lib" \
-            -maxdepth 1 \
-            -type f \
-            \( \
-              -name '*.so' \
-              -o -name '*.a' \
-            \) \
-            | sort
-
-          echo
-          echo "=========================================="
-          echo "Extracted pkg-config files"
-          echo "=========================================="
-
-          find "$ROOT/usr" \
-            -type f \
-            -name '*.pc' \
-            | sort
-
-          echo
-          echo "=========================================="
-          echo "Extracted X11 headers"
-          echo "=========================================="
-
-          find "$ROOT/usr/include" \
-            -maxdepth 3 \
-            -type f \
-            | sort \
-            | grep -E \
-              '/(X11|xcb|xorg|xshmfence)/' \
-            || true
-
-      # ------------------------------------------------------------
-      # Target pkg-config
-      # ------------------------------------------------------------
-
-      - name: Configure target pkg-config
-        shell: bash
+      - name: Enable wrapper
         run: |
-          set -euo pipefail
+          grep -q "with_wrapper_vk = true" src/vulkan/meson.build ||
+            sed -i '1i with_wrapper_vk = true' src/vulkan/meson.build
 
-          ROOT="$TERMUX_ROOT"
-
-          PKG_CONFIG_LIBDIR="$ROOT/usr/lib/pkgconfig:$ROOT/usr/share/pkgconfig"
-
-          {
-            echo "PKG_CONFIG_LIBDIR=$PKG_CONFIG_LIBDIR"
-            echo "PKG_CONFIG_SYSROOT_DIR=$ROOT"
-            echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1"
-            echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1"
-          } >> "$GITHUB_ENV"
-
-          export PKG_CONFIG_LIBDIR
-          export PKG_CONFIG_SYSROOT_DIR="$ROOT"
-          export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
-          export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
-
-          echo
-          echo "PKG_CONFIG_LIBDIR:"
-          echo "$PKG_CONFIG_LIBDIR"
-
-      # ------------------------------------------------------------
-      # Verify X11/XCB pkg-config
-      # ------------------------------------------------------------
-
-      - name: Verify X11 ARM64 dependencies
-        shell: bash
+      - name: Create cross file
         run: |
-          set -euo pipefail
-
-          ROOT="$TERMUX_ROOT"
-
-          export PKG_CONFIG_LIBDIR="$ROOT/usr/lib/pkgconfig:$ROOT/usr/share/pkgconfig"
-          export PKG_CONFIG_SYSROOT_DIR="$ROOT"
-          export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
-          export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
-
-          REQUIRED="
-          xcb
-          x11
-          x11-xcb
-          xcb-dri3
-          xcb-present
-          xcb-xfixes
-          xcb-sync
-          xcb-randr
-          xcb-shm
-          xshmfence
-          "
-
-          echo
-          echo "=========================================="
-          echo "Verifying pkg-config"
-          echo "=========================================="
-
-          for pc in $REQUIRED; do
-            echo
-            echo ">>> $pc"
-
-            if ! pkg-config --exists "$pc"; then
-              echo "ERROR: missing pkg-config module:"
-              echo "$pc"
-
-              echo
-              echo "Available modules:"
-              pkg-config --list-all \
-                | grep -Ei \
-                  'xcb|x11|xshmfence' \
-                || true
-
-              exit 1
-            fi
-
-            echo "Version:"
-            pkg-config --modversion "$pc"
-
-            echo "CFLAGS:"
-            pkg-config --cflags "$pc"
-
-            echo "LIBS:"
-            pkg-config --libs "$pc"
-          done
-
-      # ------------------------------------------------------------
-      # Force Mesa wrapper
-      # ------------------------------------------------------------
-
-      - name: Force enable Vulkan wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          FILE="src/vulkan/meson.build"
-
-          if grep -qE \
-            '^[[:space:]]*with_wrapper_vk[[:space:]]*=[[:space:]]*true' \
-            "$FILE"; then
-
-            echo "Vulkan wrapper already enabled."
-
-          else
-
-            echo "Enabling Vulkan wrapper."
-
-            sed -i \
-              '1i with_wrapper_vk = true' \
-              "$FILE"
-          fi
-
-          echo
-          echo "=== with_wrapper_vk ==="
-
-          grep -n \
-            "with_wrapper_vk" \
-            "$FILE"
-
-      # ------------------------------------------------------------
-      # Meson cross file
-      # ------------------------------------------------------------
-
-      - name: Create Android ARM64 Meson cross file
-        shell: bash
-        run: |
-          set -euo pipefail
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
           mkdir -p build
 
-          TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
-          SYSROOT="$TOOLCHAIN/sysroot"
-
           cat > build/android-arm64.ini <<EOF
-          [constants]
-          ndk = '${NDK_DIR}'
-          toolchain = '${TOOLCHAIN}'
-          sysroot = '${SYSROOT}'
-          termux = '${TERMUX_ROOT}'
-
           [binaries]
-          c = toolchain / 'bin/aarch64-linux-android34-clang'
-          cpp = toolchain / 'bin/aarch64-linux-android34-clang++'
-          ar = toolchain / 'bin/llvm-ar'
-          ranlib = toolchain / 'bin/llvm-ranlib'
-          strip = toolchain / 'bin/llvm-strip'
-          ld = toolchain / 'bin/ld.lld'
+          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+          ar = '$TOOLCHAIN/bin/llvm-ar'
+          strip = '$TOOLCHAIN/bin/llvm-strip'
           pkg-config = '/usr/bin/pkg-config'
 
           [host_machine]
@@ -642,63 +158,25 @@ PY
           endian = 'little'
 
           [properties]
-          sys_root = sysroot
+          sys_root = '$TOOLCHAIN/sysroot'
           pkg_config_libdir = [
-            termux / 'usr/lib/pkgconfig',
-            termux / 'usr/share/pkgconfig'
+            '$ROOT/usr/lib/pkgconfig',
+            '$ROOT/usr/share/pkgconfig'
           ]
 
           [built-in options]
-          c_args = [
-            '--sysroot=' + sysroot,
-            '-I' + termux / 'usr/include'
-          ]
-
-          cpp_args = [
-            '--sysroot=' + sysroot,
-            '-I' + termux / 'usr/include'
-          ]
-
-          c_link_args = [
-            '--sysroot=' + sysroot,
-            '-L' + termux / 'usr/lib'
-          ]
-
-          cpp_link_args = [
-            '--sysroot=' + sysroot,
-            '-L' + termux / 'usr/lib'
-          ]
+          c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+          cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+          c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+          cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
           EOF
 
-          echo
-          echo "=========================================="
-          echo "Meson cross file"
-          echo "=========================================="
-
-          cat build/android-arm64.ini
-
-      # ------------------------------------------------------------
-      # Configure Mesa
-      # ------------------------------------------------------------
-
-      - name: Configure Mesa
-        shell: bash
+      - name: Build Mesa
+        env:
+          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/termux-root/usr/lib/pkgconfig:${{ github.workspace }}/termux-root/usr/share/pkgconfig
+          PKG_CONFIG_SYSROOT_DIR: ${{ github.workspace }}/termux-root
         run: |
-          set -euo pipefail
-
-          ROOT="$TERMUX_ROOT"
-
-          export PKG_CONFIG_LIBDIR="$ROOT/usr/lib/pkgconfig:$ROOT/usr/share/pkgconfig"
-          export PKG_CONFIG_SYSROOT_DIR="$ROOT"
-          export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
-          export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
-
-          rm -rf \
-            build/mesa
-
-          meson setup \
-            build/mesa \
-            . \
+          meson setup build/mesa . \
             --cross-file build/android-arm64.ini \
             --prefix=/usr \
             --libdir=lib \
@@ -709,125 +187,21 @@ PY
             -Dvulkan-drivers= \
             -Dgallium-drivers=
 
-      # ------------------------------------------------------------
-      # Build
-      # ------------------------------------------------------------
+          meson compile -C build/mesa -j2
 
-      - name: Build Mesa
-        shell: bash
+      - name: Package
         run: |
-          set -euo pipefail
+          set -e
 
-          meson compile \
-            -C build/mesa \
-            -j2
+          mkdir -p artifact/lib
 
-      # ------------------------------------------------------------
-      # Find wrapper
-      # ------------------------------------------------------------
-
-      - name: Find Vulkan wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo
-          echo "=========================================="
-          echo "Searching for Vulkan wrapper"
-          echo "=========================================="
-
-          find build/mesa \
-            -type f \
-            \( \
-              -name 'libvulkan_wrapper.so' \
-              -o -name '*vulkan*wrapper*.so' \
-            \) \
-            -print
-
-      # ------------------------------------------------------------
-      # Package and verify ELF
-      # ------------------------------------------------------------
-
-      - name: Package Vulkan wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p \
-            artifact/lib
-
-          WRAPPER="$(
-            find build/mesa \
-              -type f \
-              -name 'libvulkan_wrapper.so' \
-              | head -n1
-          )"
-
-          if [ -z "$WRAPPER" ]; then
-            echo "ERROR: libvulkan_wrapper.so not found"
-            exit 1
-          fi
-
-          echo
-          echo "Wrapper:"
-          echo "$WRAPPER"
-
-          cp \
-            "$WRAPPER" \
+          cp "$(find build/mesa -type f -name libvulkan_wrapper.so | head -n1)" \
             artifact/lib/libvulkan_wrapper.so
 
-          echo
-          echo "=========================================="
-          echo "file"
-          echo "=========================================="
+          file artifact/lib/libvulkan_wrapper.so
 
-          file \
-            artifact/lib/libvulkan_wrapper.so
-
-          echo
-          echo "=========================================="
-          echo "ELF header"
-          echo "=========================================="
-
-          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-            -h \
-            artifact/lib/libvulkan_wrapper.so
-
-          echo
-          echo "=========================================="
-          echo "Architecture"
-          echo "=========================================="
-
-          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-            -h \
-            artifact/lib/libvulkan_wrapper.so \
-            | grep -E \
-              'Class:|Machine:|Type:'
-
-          echo
-          echo "=========================================="
-          echo "NEEDED libraries"
-          echo "=========================================="
-
-          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-            -d \
-            artifact/lib/libvulkan_wrapper.so \
-            | grep NEEDED \
-            || true
-
-      # ------------------------------------------------------------
-      # Upload
-      # ------------------------------------------------------------
-
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: mesa-vulkan-wrapper-android-arm64-x11
-          path: artifact/
-          if-no-files-found: error
-
-و در "src/vulkan/meson.build" هم باید ابتدای فایل این خط وجود داشته باشد:
-
-with_wrapper_vk = true
-
-این نسخه دیگر آن "awk" خراب را ندارد. همچنین repository رسمی Termux نشان می‌دهد "libx11" واقعاً به "libxcb" و "xorgproto" وابسته است، و گزارش‌های build خود Termux نیز زنجیره‌ی "xorgproto → xcb-proto → libxcb → libx11" را نشان می‌دهند.
+          path: artifact
