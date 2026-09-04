@@ -59,6 +59,102 @@ jobs:
             sed -i '1i with_wrapper_vk = true' src/vulkan/meson.build
           fi
 
+
+
+      - name: Download ARM64 target dependencies
+        run: |
+          set -e
+
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/usr"
+
+          BASE="https://packages-cf.termux.dev:443/apt/termux-main"
+
+          wget -q \
+            "$BASE/dists/stable/main/binary-aarch64/Packages.gz" \
+            -O /tmp/Packages.gz
+
+          gzip -dc /tmp/Packages.gz > /tmp/Packages
+
+          download_pkg() {
+            PKG="$1"
+
+            FILE=$(awk -v pkg="$PKG" '
+              /^Package:/ {
+                found = ($2 == pkg)
+              }
+              found && /^Filename:/ {
+                print $2
+                exit
+              }
+            ' /tmp/Packages)
+
+            if [ -z "$FILE" ]; then
+              echo "Package not found: $PKG"
+              exit 1
+            fi
+
+            DEB="/tmp/$(basename "$FILE")"
+
+            echo "Downloading $PKG"
+
+            wget -q --show-progress \
+              "$BASE/$FILE" \
+              -O "$DEB"
+
+            rm -rf /tmp/pkg
+            mkdir -p /tmp/pkg
+
+            cd /tmp/pkg
+
+            ar x "$DEB"
+
+            DATA=$(find . -maxdepth 1 -type f -name 'data.tar.*' | head -n 1)
+
+            if [ -z "$DATA" ]; then
+              echo "Invalid package archive: $PKG"
+              exit 1
+            fi
+
+            rm -rf extract
+            mkdir -p extract
+
+            tar -xf "$DATA" -C extract
+
+            if [ -d extract/data/data/com.termux/files/usr ]; then
+              cp -a \
+                extract/data/data/com.termux/files/usr/. \
+                "$ROOT/usr/"
+            elif [ -d extract/usr ]; then
+              cp -a \
+                extract/usr/. \
+                "$ROOT/usr/"
+            else
+              echo "Unknown package layout: $PKG"
+              exit 1
+            fi
+
+            cd "$GITHUB_WORKSPACE"
+          }
+
+          download_pkg libandroid-support
+          download_pkg libdrm
+          
+          for d in \
+            "$ROOT/usr/lib/pkgconfig" \
+            "$ROOT/usr/share/pkgconfig"
+          do
+            if [ -d "$d" ]; then
+              find "$d" \
+                -type f \
+                -name '*.pc' \
+                -exec sed -i \
+                "s#/data/data/com.termux/files/usr#$ROOT/usr#g" \
+                {} +
+            fi
+          done
+
+
       - name: Create Android ARM64 cross file
         run: |
           set -e
