@@ -18,6 +18,8 @@ jobs:
 
       - name: Install tools
         run: |
+          set -e
+
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
@@ -26,7 +28,9 @@ jobs:
             pkg-config \
             python3-mako \
             wget \
-            unzip
+            unzip \
+            gzip \
+            binutils
 
       - name: Download Android NDK
         run: |
@@ -39,6 +43,7 @@ jobs:
             -O ndk.zip
 
           mkdir -p "$NDK.tmp"
+
           unzip -q ndk.zip -d "$NDK.tmp"
 
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
@@ -80,6 +85,7 @@ jobs:
 
             DEB="/tmp/$(basename "$FILE")"
 
+            echo "Downloading $PKG"
             wget -q --show-progress \
               "$BASE/$FILE" \
               -O "$DEB"
@@ -88,6 +94,7 @@ jobs:
             mkdir -p /tmp/pkg
 
             cd /tmp/pkg
+
             ar x "$DEB"
 
             DATA=$(find . -maxdepth 1 -type f -name 'data.tar.*' | head -n 1)
@@ -132,32 +139,51 @@ jobs:
           mkdir -p build
 
           cat > build/android-arm64.ini <<EOF
-          [binaries]
-          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-          ar = '$TOOLCHAIN/bin/llvm-ar'
-          strip = '$TOOLCHAIN/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
+[binaries]
+c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+ar = '$TOOLCHAIN/bin/llvm-ar'
+strip = '$TOOLCHAIN/bin/llvm-strip'
+pkg-config = '/usr/bin/pkg-config'
 
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8'
-          endian = 'little'
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8'
+endian = 'little'
 
-          [built-in options]
-          c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-          cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-          c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-          cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-          EOF
+[built-in options]
+c_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-I$ROOT/usr/include'
+]
+
+cpp_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-I$ROOT/usr/include'
+]
+
+c_link_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-L$ROOT/usr/lib'
+]
+
+cpp_link_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-L$ROOT/usr/lib'
+]
+EOF
 
       - name: Configure Mesa
         env:
           PKG_CONFIG_LIBDIR: ${{ github.workspace }}/termux-root/usr/lib/pkgconfig:${{ github.workspace }}/termux-root/usr/share/pkgconfig
-          PKG_CONFIG_SYSROOT_DIR: ${{ github.workspace }}/termux-root
         run: |
           set -e
+
+          export PKG_CONFIG_PATH=""
+
+          test -d "$ROOT/usr/lib/pkgconfig"
+          test -f "$ROOT/usr/lib/pkgconfig/xcb.pc"
 
           rm -rf build/mesa
 
