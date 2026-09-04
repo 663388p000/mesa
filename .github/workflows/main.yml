@@ -46,14 +46,13 @@ jobs:
           echo "22105e410cf29afcf163760cc95522b9fb981121  android-ndk-r27d-linux.zip" \
             | sha1sum -c -
 
-      - name: Extract Android NDK
+      - name: Verify Android compiler
         run: |
-          unzip -q android-ndk-r27d-linux.zip
-
-          test -x "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang"
-
-          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
-            --version
+       export TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"       
+       "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
+       --version
+       "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++" \
+       --version
 
       - name: Create Android ARM64 cross file
         run: |
