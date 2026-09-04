@@ -143,6 +143,8 @@ jobs:
           download_pkg xorgproto
           download_pkg xcb-proto
 
+          download_pkg libdrm
+
       - name: Enable Vulkan wrapper
         run: |
           set -e
