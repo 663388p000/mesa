@@ -21,19 +21,21 @@ jobs:
           set -e
 
           sudo apt-get update
-
           sudo apt-get install -y \
             build-essential \
             meson \
             ninja-build \
             pkg-config \
             python3-mako \
+            python3-yaml \
+            python3-packaging \
+            glslang-tools \
+            bison \
+            flex \
             wget \
             unzip \
             gzip \
-            binutils \
-            bison \
-            flex
+            binutils
 
       - name: Download Android NDK
         run: |
@@ -48,12 +50,11 @@ jobs:
           mkdir -p "$NDK.tmp"
 
           unzip -q ndk.zip -d "$NDK.tmp"
-
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
 
           rm -rf "$NDK.tmp" ndk.zip
 
-      - name: Download ARM64 target dependencies
+      - name: Download ARM64 X11 target dependencies
         run: |
           set -e
 
@@ -108,6 +109,7 @@ jobs:
               exit 1
             fi
 
+            rm -rf extract
             mkdir -p extract
 
             tar -xf "$DATA" -C extract
@@ -139,12 +141,18 @@ jobs:
           download_pkg libxrender
           download_pkg libxshmfence
           download_pkg libxxf86vm
-          download_pkg libdrm
           download_pkg xorgproto
           download_pkg xcb-proto
 
-          test -f "$ROOT/usr/include/xf86drm.h"
-          test -f "$ROOT/usr/include/drm.h"
+      - name: Normalize target pkg-config files
+        run: |
+          set -e
+
+          find "$ROOT/usr" \
+            -type f \
+            -name '*.pc' \
+            -exec sed -i \
+              's#/data/data/com.termux/files/usr#/usr#g' {} +
 
       - name: Enable Vulkan wrapper
         run: |
@@ -163,35 +171,49 @@ jobs:
           mkdir -p build
 
           cat > build/android-arm64.ini <<EOF
-          [binaries]
-          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-          ar = '$TOOLCHAIN/bin/llvm-ar'
-          strip = '$TOOLCHAIN/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
+[binaries]
+c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+ar = '$TOOLCHAIN/bin/llvm-ar'
+strip = '$TOOLCHAIN/bin/llvm-strip'
+pkg-config = '/usr/bin/pkg-config'
 
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8'
-          endian = 'little'
-          EOF
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8'
+endian = 'little'
+
+[properties]
+sys_root = '$TOOLCHAIN/sysroot'
+pkg_config_libdir = [
+  '$ROOT/usr/lib/pkgconfig',
+  '$ROOT/usr/share/pkgconfig'
+]
+
+[built-in options]
+c_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-I$ROOT/usr/include'
+]
+
+cpp_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-I$ROOT/usr/include'
+]
+
+c_link_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-L$ROOT/usr/lib'
+]
+
+cpp_link_args = [
+  '--sysroot=$TOOLCHAIN/sysroot',
+  '-L$ROOT/usr/lib'
+]
+EOF
 
       - name: Configure Mesa
-        env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/termux-root/usr/lib/pkgconfig:${{ github.workspace }}/termux-root/usr/share/pkgconfig
-          PKG_CONFIG_PATH: ""
-          CFLAGS: >-
-            --sysroot=${{ github.workspace }}/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-            -I${{ github.workspace }}/termux-root/usr/include
-            -I${{ github.workspace }}/termux-root/usr/include/libdrm
-          CXXFLAGS: >-
-            --sysroot=${{ github.workspace }}/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-            -I${{ github.workspace }}/termux-root/usr/include
-            -I${{ github.workspace }}/termux-root/usr/include/libdrm
-          LDFLAGS: >-
-            --sysroot=${{ github.workspace }}/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-            -L${{ github.workspace }}/termux-root/usr/lib
         run: |
           set -e
 
@@ -205,40 +227,29 @@ jobs:
             -Ddefault_library=shared \
             -Dplatforms=x11 \
             -Dglx=disabled \
-            -Dvulkan-drivers=wrapper \
+            -Dvulkan-drivers= \
             -Dgallium-drivers=
 
       - name: Build Mesa
         run: |
           set -e
 
-          ninja -C build/mesa -j$(nproc)
+          meson compile -C build/mesa -j$(nproc)
 
-      - name: Package only Vulkan wrapper
+      - name: Package
         run: |
           set -e
 
           rm -rf artifact
           mkdir -p artifact
 
-          WRAPPER=$(find build/mesa \
+          find build/mesa \
             -type f \
-            -name 'libvulkan_wrapper.so' \
-            -print -quit)
-
-          if [ -z "$WRAPPER" ]; then
-            echo "ERROR: libvulkan_wrapper.so was not produced"
-            exit 1
-          fi
-
-          echo "Found: $WRAPPER"
-
-          cp -a \
-            "$WRAPPER" \
-            artifact/libvulkan_wrapper.so
+            \( -name '*.so' -o -name '*.so.*' \) \
+            -exec cp -a {} artifact/ \;
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: libvulkan-wrapper-arm64
-          path: artifact/libvulkan_wrapper.so
+          name: mesa-vulkan-wrapper-arm64
+          path: artifact/
