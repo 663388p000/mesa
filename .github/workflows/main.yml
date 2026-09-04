@@ -166,6 +166,7 @@ jobs:
             -Dplatforms=android \
             -Dplatform-sdk-version=${ANDROID_API} \
             -Dandroid-stub=true \
+            -DVK_USE_PLATFORM_XCB_KHR=true \
             -Dandroid-libbacktrace=disabled \
             -Ddefault_library=shared \
             -Dvulkan-drivers= \
