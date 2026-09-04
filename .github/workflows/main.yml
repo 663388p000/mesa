@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -24,10 +24,8 @@ jobs:
             meson \
             ninja-build \
             pkg-config \
-            python3 \
             wget \
-            unzip \
-            file
+            unzip
 
       - name: Download Android NDK
         run: |
@@ -42,8 +40,6 @@ jobs:
           mkdir -p "$NDK.tmp"
           unzip -q ndk.zip -d "$NDK.tmp"
 
-          test -d "$NDK.tmp/android-ndk-r27d"
-
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
 
           rm -rf "$NDK.tmp" ndk.zip
@@ -57,7 +53,7 @@ jobs:
 
           BASE="https://packages-cf.termux.dev:443/apt/termux-main"
 
-          wget -q --show-progress \
+          wget -q \
             "$BASE/dists/stable/main/binary-aarch64/Packages.gz" \
             -O /tmp/Packages.gz
 
@@ -77,13 +73,11 @@ jobs:
             ' /tmp/Packages)
 
             if [ -z "$FILE" ]; then
-              echo "ERROR: package not found: $PKG"
+              echo "Package not found: $PKG"
               exit 1
             fi
 
             DEB="/tmp/$(basename "$FILE")"
-
-            echo "Downloading $PKG"
 
             wget -q --show-progress \
               "$BASE/$FILE" \
@@ -95,12 +89,10 @@ jobs:
             cd /tmp/pkg
             ar x "$DEB"
 
-            DATA=$(find . -maxdepth 1 -type f \
-              -name 'data.tar.*' | head -n 1)
+            DATA=$(find . -maxdepth 1 -type f -name 'data.tar.*' | head -n 1)
 
             if [ -z "$DATA" ]; then
-              echo "ERROR: data archive not found:"
-              ar t "$DEB"
+              echo "Invalid package: $PKG"
               exit 1
             fi
 
@@ -122,24 +114,6 @@ jobs:
           download_pkg xorgproto
           download_pkg xcb-proto
 
-          
-      - name: Check pkg-config
-        env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/termux-root/usr/lib/pkgconfig:${{ github.workspace }}/termux-root/usr/share/pkgconfig
-          PKG_CONFIG_SYSROOT_DIR: ${{ github.workspace }}/termux-root
-        run: |
-          set -e
-
-          echo "===== pkg-config files ====="
-          find "$ROOT/usr" -name '*.pc' | sort
-
-          echo "===== xcb.pc ====="
-          find "$ROOT/usr" -name 'xcb.pc' -print
-
-          echo "===== pkg-config xcb ====="
-          pkg-config --modversion xcb
-          pkg-config --cflags --libs xcb
-
       - name: Enable Vulkan wrapper
         run: |
           set -e
@@ -158,26 +132,24 @@ jobs:
 
           cat > build/android-arm64.ini <<EOF
           [binaries]
-           c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-           cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-            ar = '$TOOLCHAIN/bin/llvm-ar'
-            strip = '$TOOLCHAIN/bin/llvm-strip'
-            pkg-config = '/usr/bin/pkg-config'
+          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+          ar = '$TOOLCHAIN/bin/llvm-ar'
+          strip = '$TOOLCHAIN/bin/llvm-strip'
+          pkg-config = '/usr/bin/pkg-config'
 
-            [host_machine]
-            system = 'android'
-            cpu_family = 'aarch64'
-            cpu = 'armv8'
-            endian = 'little'
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8'
+          endian = 'little'
 
-            [built-in options]
-            c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-            cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-            c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-            cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-            EOF
-
-            cat build/android-arm64.ini
+          [built-in options]
+          c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+          cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+          c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+          cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+          EOF
 
       - name: Configure Mesa
         env:
@@ -202,36 +174,14 @@ jobs:
       - name: Build Mesa
         run: |
           set -e
+
           ninja -C build/mesa -j$(nproc)
-
-      - name: Strip libraries
-        run: |
-          set -e
-
-          STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-
-          find build/mesa \
-            -type f \
-            \( -name '*.so' -o -name '*.so.*' \) \
-            -exec "$STRIP" --strip-unneeded {} \; || true
-
-      - name: Verify ARM64
-        run: |
-          set -e
-
-          READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-
-          find build/mesa \
-            -type f \
-            \( -name '*.so' -o -name '*.so.*' \) \
-            -print \
-            -exec "$READELF" -h {} \; \
-            | grep -E 'File:|Class:|Machine:'
 
       - name: Package
         run: |
           set -e
 
+          rm -rf artifact
           mkdir -p artifact
 
           find build/mesa \
@@ -239,9 +189,7 @@ jobs:
             \( -name '*.so' -o -name '*.so.*' \) \
             -exec cp -a {} artifact/ \;
 
-          find artifact -type f -print
-
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: mesa-vulkan-wrapper-arm64
