@@ -40,7 +40,7 @@ jobs:
             autoconf \
             automake \
             libtool \
-            xorgproto
+            
 
       # ------------------------------------------------------------
       # Android NDK
