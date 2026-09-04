@@ -21,21 +21,19 @@ jobs:
           set -e
 
           sudo apt-get update
+
           sudo apt-get install -y \
             build-essential \
             meson \
             ninja-build \
             pkg-config \
             python3-mako \
-            python3-yaml \
-            python3-packaging \
-            glslang-tools \
-            bison \
-            flex \
             wget \
             unzip \
             gzip \
-            binutils
+            binutils \
+            bison \
+            flex
 
       - name: Download Android NDK
         run: |
@@ -50,6 +48,7 @@ jobs:
           mkdir -p "$NDK.tmp"
 
           unzip -q ndk.zip -d "$NDK.tmp"
+
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
 
           rm -rf "$NDK.tmp" ndk.zip
@@ -144,16 +143,6 @@ jobs:
           download_pkg xorgproto
           download_pkg xcb-proto
 
-      - name: Normalize target pkg-config files
-        run: |
-          set -e
-
-          find "$ROOT/usr" \
-            -type f \
-            -name '*.pc' \
-            -exec sed -i \
-              's#/data/data/com.termux/files/usr#/usr#g' {} +
-
       - name: Enable Vulkan wrapper
         run: |
           set -e
@@ -172,48 +161,29 @@ jobs:
 
           cat > build/android-arm64.ini <<EOF
           [binaries]
-          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-          ar = '$TOOLCHAIN/bin/llvm-ar'
-          strip = '$TOOLCHAIN/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
+         c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+         cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+         ar = '$TOOLCHAIN/bin/llvm-ar'
+         strip = '$TOOLCHAIN/bin/llvm-strip'
+         pkg-config = '/usr/bin/pkg-config'
 
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8'
-          endian = 'little'
+         [host_machine]
+         system = 'android'
+         cpu_family = 'aarch64'
+         cpu = 'armv8'
+         endian = 'little'
 
-          [properties]
-          sys_root = '$TOOLCHAIN/sysroot'
-          pkg_config_libdir = [
-          '$ROOT/usr/lib/pkgconfig',
-          '$ROOT/usr/share/pkgconfig'
-           ]
-
-           [built-in options]
-           c_args = [
-           '--sysroot=$TOOLCHAIN/sysroot',
-           '-I$ROOT/usr/include'
-          ]
-
-          cpp_args = [
-          '--sysroot=$TOOLCHAIN/sysroot',
-          '-I$ROOT/usr/include'
-          ]
-
-          c_link_args = [
-          '--sysroot=$TOOLCHAIN/sysroot',
-          '-L$ROOT/usr/lib'
-          ]
-
-          cpp_link_args = [
-          '--sysroot=$TOOLCHAIN/sysroot',
-          '-L$ROOT/usr/lib'
-          ]
-          EOF
+        [built-in options]
+       c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+       cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+       c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+       cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+       EOF
 
       - name: Configure Mesa
+        env:
+          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/termux-root/usr/lib/pkgconfig:${{ github.workspace }}/termux-root/usr/share/pkgconfig
+          PKG_CONFIG_PATH: ""
         run: |
           set -e
 
@@ -234,7 +204,7 @@ jobs:
         run: |
           set -e
 
-          meson compile -C build/mesa -j$(nproc)
+          ninja -C build/mesa -j$(nproc)
 
       - name: Package
         run: |
