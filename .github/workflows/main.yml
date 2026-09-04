@@ -183,7 +183,7 @@ jobs:
           pkg-config = '/usr/bin/pkg-config'
 
           [host_machine]
-          system = 'android'
+          system = 'linux'
           cpu_family = 'aarch64'
           cpu = 'armv8'
           endian = 'little'
