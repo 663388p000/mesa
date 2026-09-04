@@ -53,7 +53,7 @@ jobs:
 
           rm -rf "$NDK.tmp" ndk.zip
 
-      - name: Download ARM64 X11 target dependencies
+      - name: Download ARM64 target dependencies
         run: |
           set -e
 
@@ -140,8 +140,23 @@ jobs:
           download_pkg libxrender
           download_pkg libxshmfence
           download_pkg libxxf86vm
+          download_pkg libdrm
           download_pkg xorgproto
           download_pkg xcb-proto
+
+          for d in \
+            "$ROOT/usr/lib/pkgconfig" \
+            "$ROOT/usr/share/pkgconfig"
+          do
+            if [ -d "$d" ]; then
+              find "$d" \
+                -type f \
+                -name '*.pc' \
+                -exec sed -i \
+                "s#/data/data/com.termux/files/usr#$ROOT/usr#g" \
+                {} +
+            fi
+          done
 
       - name: Enable Vulkan wrapper
         run: |
@@ -160,25 +175,19 @@ jobs:
           mkdir -p build
 
           cat > build/android-arm64.ini <<EOF
-          [binaries]
-          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-          ar = '$TOOLCHAIN/bin/llvm-ar'
-          strip = '$TOOLCHAIN/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
+[binaries]
+c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+ar = '$TOOLCHAIN/bin/llvm-ar'
+strip = '$TOOLCHAIN/bin/llvm-strip'
+pkg-config = '/usr/bin/pkg-config'
 
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8'
-          endian = 'little'
-
-          [built-in options]
-          c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-          cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-          c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-          cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-          EOF
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8'
+endian = 'little'
+EOF
 
       - name: Configure Mesa
         env:
@@ -186,6 +195,12 @@ jobs:
           PKG_CONFIG_PATH: ""
         run: |
           set -e
+
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+
+          export CFLAGS="--sysroot=$TOOLCHAIN/sysroot -I$ROOT/usr/include"
+          export CXXFLAGS="--sysroot=$TOOLCHAIN/sysroot -I$ROOT/usr/include"
+          export LDFLAGS="--sysroot=$TOOLCHAIN/sysroot -L$ROOT/usr/lib"
 
           rm -rf build/mesa
 
