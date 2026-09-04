@@ -194,7 +194,7 @@ jobs:
             -Ddefault_library=shared \
             -Dplatforms=x11 \
             -Dglx=disabled \
-            -Dvulkan-drivers= \
+            -Dvulkan-drivers=wrapper \
             -Dgallium-drivers=
       
       - name: Build Mesa
