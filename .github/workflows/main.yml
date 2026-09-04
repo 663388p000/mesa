@@ -164,6 +164,8 @@ jobs:
 
       - name: Configure Mesa
         run: |
+          rm -rf build
+
           meson setup build \
             --cross-file .ci/android-aarch64.ini \
             --buildtype=release \
@@ -172,13 +174,7 @@ jobs:
             -Dplatforms=x11 \
             -Ddefault_library=shared \
             -Dvulkan-drivers= \
-            -Dgallium-drivers= \
-            -Degl=disabled \
-            -Dglx=disabled \
-            -Dgbm=disabled \
-            -Dtests=false \
-            -Dinstall_mesa_clc=false \
-            -Dinstall_glx_indirect=false
+            -Dgallium-drivers=
 
       # ------------------------------------------------------------
       # Build
