@@ -1,4 +1,4 @@
-name: Build Mesa Vulkan Wrapper
+name: Build Mesa Android ARM64 Vulkan Wrapper
 
 on:
   workflow_dispatch:
@@ -9,7 +9,6 @@ jobs:
 
     env:
       NDK: ${{ github.workspace }}/android-ndk-r27d
-      ROOT: ${{ github.workspace }}/termux-root
       NDK_URL: https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
 
     steps:
@@ -26,7 +25,6 @@ jobs:
             build-essential \
             meson \
             ninja-build \
-            pkg-config \
             python3-mako \
             wget \
             unzip \
@@ -53,111 +51,6 @@ jobs:
 
           rm -rf "$NDK.tmp" ndk.zip
 
-      - name: Download ARM64 target dependencies
-        run: |
-          set -e
-
-          rm -rf "$ROOT"
-          mkdir -p "$ROOT/usr"
-
-          BASE="https://packages-cf.termux.dev:443/apt/termux-main"
-
-          wget -q \
-            "$BASE/dists/stable/main/binary-aarch64/Packages.gz" \
-            -O /tmp/Packages.gz
-
-          gzip -dc /tmp/Packages.gz > /tmp/Packages
-
-          download_pkg() {
-            PKG="$1"
-
-            FILE=$(awk -v pkg="$PKG" '
-              /^Package:/ {
-                found = ($2 == pkg)
-              }
-              found && /^Filename:/ {
-                print $2
-                exit
-              }
-            ' /tmp/Packages)
-
-            if [ -z "$FILE" ]; then
-              echo "Package not found: $PKG"
-              exit 1
-            fi
-
-            DEB="/tmp/$(basename "$FILE")"
-
-            echo "Downloading $PKG"
-
-            wget -q --show-progress \
-              "$BASE/$FILE" \
-              -O "$DEB"
-
-            rm -rf /tmp/pkg
-            mkdir -p /tmp/pkg
-
-            cd /tmp/pkg
-
-            ar x "$DEB"
-
-            DATA=$(find . -maxdepth 1 -type f -name 'data.tar.*' | head -n 1)
-
-            if [ -z "$DATA" ]; then
-              echo "Invalid package archive: $PKG"
-              exit 1
-            fi
-
-            rm -rf extract
-            mkdir -p extract
-
-            tar -xf "$DATA" -C extract
-
-            if [ -d extract/data/data/com.termux/files/usr ]; then
-              cp -a \
-                extract/data/data/com.termux/files/usr/. \
-                "$ROOT/usr/"
-            elif [ -d extract/usr ]; then
-              cp -a \
-                extract/usr/. \
-                "$ROOT/usr/"
-            else
-              echo "Unknown package layout: $PKG"
-              exit 1
-            fi
-
-            cd "$GITHUB_WORKSPACE"
-          }
-
-          download_pkg libandroid-support
-          download_pkg libxau
-          download_pkg libxdmcp
-          download_pkg libxcb
-          download_pkg libx11
-          download_pkg libxext
-          download_pkg libxfixes
-          download_pkg libxrandr
-          download_pkg libxrender
-          download_pkg libxshmfence
-          download_pkg libxxf86vm
-          download_pkg libdrm
-          download_pkg xorgproto
-          download_pkg xcb-proto
-
-          for d in \
-            "$ROOT/usr/lib/pkgconfig" \
-            "$ROOT/usr/share/pkgconfig"
-          do
-            if [ -d "$d" ]; then
-              find "$d" \
-                -type f \
-                -name '*.pc' \
-                -exec sed -i \
-                "s#/data/data/com.termux/files/usr#$ROOT/usr#g" \
-                {} +
-            fi
-          done
-
       - name: Enable Vulkan wrapper
         run: |
           set -e
@@ -176,44 +69,47 @@ jobs:
 
           cat > build/android-arm64.ini <<EOF
           [binaries]
+          ar = '$TOOLCHAIN/bin/llvm-ar'
           c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
           cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-          ar = '$TOOLCHAIN/bin/llvm-ar'
           strip = '$TOOLCHAIN/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
+          c_ld = 'lld'
+          cpp_ld = 'lld'
 
           [host_machine]
-          system = 'linux'
+          system = 'android'
           cpu_family = 'aarch64'
           cpu = 'armv8'
           endian = 'little'
+
+          [built-in options]
+          c_args = ['--sysroot=$TOOLCHAIN/sysroot']
+          cpp_args = ['--sysroot=$TOOLCHAIN/sysroot']
+          c_link_args = ['--sysroot=$TOOLCHAIN/sysroot']
+          cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot']
           EOF
 
       - name: Configure Mesa
-        env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/termux-root/usr/lib/pkgconfig:${{ github.workspace }}/termux-root/usr/share/pkgconfig
-          PKG_CONFIG_PATH: ""
         run: |
           set -e
-
-          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-
-          export CFLAGS="--sysroot=$TOOLCHAIN/sysroot -I$ROOT/usr/include"
-          export CXXFLAGS="--sysroot=$TOOLCHAIN/sysroot -I$ROOT/usr/include"
-          export LDFLAGS="--sysroot=$TOOLCHAIN/sysroot -L$ROOT/usr/lib"
 
           rm -rf build/mesa
 
           meson setup build/mesa . \
             --cross-file build/android-arm64.ini \
-            --prefix=/usr \
-            --libdir=lib \
+            --prefix=/system \
+            --libdir=lib64 \
             -Dbuildtype=release \
             -Ddefault_library=shared \
-            -Dplatforms=x11 \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=34 \
+            -Dandroid-stub=true \
+            -Dandroid-libbacktrace=disabled \
             -Dglx=disabled \
-            -Dvulkan-drivers=wrapper \
-            -Dgallium-drivers=
+            -Degl=disabled \
+            -Dgbm=disabled \
+            -Dgallium-drivers= \
+            -Dvulkan-drivers=wrapper
 
       - name: Build Mesa
         run: |
@@ -236,5 +132,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: mesa-vulkan-wrapper-arm64
+          name: mesa-vulkan-wrapper-android-arm64
           path: artifact/
