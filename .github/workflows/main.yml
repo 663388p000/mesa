@@ -44,22 +44,20 @@ jobs:
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
 
           rm -rf "$NDK.tmp" ndk.zip
-
       - name: Download X11 libraries
         run: |
           set -e
 
           ROOT="$ROOT/usr"
+          MAIN="https://packages-cf.termux.dev:443/apt/termux-main"
 
           mkdir -p "$ROOT" /tmp/termux
 
-          MAIN="https://packages-cf.termux.dev:443/apt/termux-main"
-
           wget -4 -q --show-progress \
-            "$MAIN/dists/stable/main/binary-aarch64/Packages.xz" \
-            -O /tmp/Packages.xz
+            "$MAIN/dists/stable/main/binary-aarch64/Packages.gz" \
+            -O /tmp/Packages.gz
 
-          xzcat /tmp/Packages.xz > /tmp/Packages
+          gzip -dc /tmp/Packages.gz > /tmp/Packages
 
           download_pkg() {
             package="$1"
@@ -112,8 +110,8 @@ jobs:
           download_pkg xcb-proto
 
           rm -rf /tmp/termux
+          rm -f /tmp/Packages.gz
           rm -f /tmp/Packages
-          rm -f /tmp/Packages.xz
 
       - name: Enable wrapper
         run: |
