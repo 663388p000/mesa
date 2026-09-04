@@ -40,45 +40,26 @@ jobs:
 
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
           rm -rf "$NDK.tmp" ndk.zip
-      
-      - name: Test Termux repository
-        run: |
-          set -eux
 
-          curl -4 -fL --retry 5 --retry-all-errors \
-            -A "Mozilla/5.0" \
-            "https://packages-cf.termux.dev:443/apt/termux-main/dists/stable/Release" \
-            -o /tmp/Release
 
-          cat /tmp/Release
-
-      - name: Download X11 libraries
+            - name: Download X11 libraries
         run: |
           set -e
 
           ROOT="$ROOT/usr"
-          mkdir -p "$ROOT" /tmp/termux-pkg
+          mkdir -p "$ROOT" /tmp/termux
 
           MAIN="https://packages-cf.termux.dev:443/apt/termux-main"
-          X11="https://packages-cf.termux.dev:443/apt/termux-x11"
 
           curl -4 -fL --retry 5 --retry-all-errors \
             -A "Mozilla/5.0" \
             "$MAIN/dists/stable/main/binary-aarch64/Packages.xz" \
-            -o /tmp/main-Packages.xz
+            -o /tmp/Packages.xz
 
-          curl -4 -fL --retry 5 --retry-all-errors \
-            -A "Mozilla/5.0" \
-            "$X11/dists/x11/main/binary-aarch64/Packages.xz" \
-            -o /tmp/x11-Packages.xz
-
-          xzcat /tmp/main-Packages.xz > /tmp/main-Packages
-          xzcat /tmp/x11-Packages.xz > /tmp/x11-Packages
+          xzcat /tmp/Packages.xz > /tmp/Packages
 
           download_pkg() {
-            repo="$1"
-            index="$2"
-            package="$3"
+            package="$1"
 
             filename="$(awk -v p="$package" '
               $0 == "Package: " p { found=1; next }
@@ -87,49 +68,55 @@ jobs:
                 print
                 exit
               }
-              found && /^Package: / { exit }
-            ' "$index")"
+              found && /^Package: / {
+                exit
+              }
+            ' /tmp/Packages)"
 
-            test -n "$filename"
+            if [ -z "$filename" ]; then
+              echo "ERROR: package not found: $package"
+              exit 1
+            fi
 
-            echo "Downloading: $package"
-            echo "Path: $filename"
+            url="$MAIN/$filename"
+
+            echo
+            echo "========================================"
+            echo "Package: $package"
+            echo "URL: $url"
+            echo "========================================"
 
             curl -4 -fL --retry 5 --retry-all-errors \
               -A "Mozilla/5.0" \
-              "$repo/$filename" \
-              -o /tmp/termux-pkg/package.deb
+              "$url" \
+              -o /tmp/termux/package.deb
 
-            rm -rf /tmp/termux-pkg/extract
-            mkdir -p /tmp/termux-pkg/extract
+            rm -rf /tmp/termux/extract
+            mkdir -p /tmp/termux/extract
 
-            ar x /tmp/termux-pkg/package.deb \
-              --output /tmp/termux-pkg/extract
+            ar x /tmp/termux/package.deb \
+              --output /tmp/termux/extract
 
-            tar -xf /tmp/termux-pkg/extract/data.tar.* -C "$ROOT"
-
-            rm -rf /tmp/termux-pkg/extract
-            rm -f /tmp/termux-pkg/package.deb
+            tar -xf /tmp/termux/extract/data.tar.* \
+              -C "$ROOT"
           }
 
-          download_pkg "$MAIN" /tmp/main-Packages libandroid-support
-          download_pkg "$MAIN" /tmp/main-Packages libxau
-          download_pkg "$MAIN" /tmp/main-Packages libxdmcp
-          download_pkg "$MAIN" /tmp/main-Packages libxcb
-          download_pkg "$MAIN" /tmp/main-Packages libx11
-          download_pkg "$MAIN" /tmp/main-Packages libxext
-          download_pkg "$MAIN" /tmp/main-Packages libxfixes
-          download_pkg "$MAIN" /tmp/main-Packages libxrandr
-          download_pkg "$MAIN" /tmp/main-Packages libxrender
-          download_pkg "$MAIN" /tmp/main-Packages libxshmfence
-          download_pkg "$MAIN" /tmp/main-Packages xorgproto
-          download_pkg "$MAIN" /tmp/main-Packages xcb-proto
+          download_pkg libandroid-support
+          download_pkg libxau
+          download_pkg libxdmcp
+          download_pkg libxcb
+          download_pkg libx11
+          download_pkg libxext
+          download_pkg libxfixes
+          download_pkg libxrandr
+          download_pkg libxrender
+          download_pkg libxshmfence
+          download_pkg xorgproto
+          download_pkg xcb-proto
 
-          rm -f /tmp/main-Packages.xz
-          rm -f /tmp/x11-Packages.xz
-          rm -f /tmp/main-Packages
-          rm -f /tmp/x11-Packages
+          rm -rf /tmp/termux /tmp/Packages /tmp/Packages.xz
 
+      
       - name: Enable wrapper
         run: |
           set -e
