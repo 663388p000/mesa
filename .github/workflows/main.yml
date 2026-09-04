@@ -1,471 +1,454 @@
-name: Build Vulkan Wrapper - Android ARM64 X11
+name: Build Mesa Vulkan Wrapper - Android ARM64 X11
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     env:
       NDK_VERSION: r27d
-      ANDROID_API: 34
-
-      NDK_DIR: ${{ github.workspace }}/android-ndk-r27d
-      PREFIX: ${{ github.workspace }}/android-sysroot
-
-      # Termux/Android target
-      TERMUX_PREFIX: ${{ github.workspace }}/android-sysroot
+      ANDROID_API: "34"
+      NDK_DIR: ${{ github.workspace }}/android-ndk
 
     steps:
-
-      # ============================================================
-      # Checkout
-      # ============================================================
-
-      - name: Checkout
+      - name: Checkout Mesa
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-
-      # ============================================================
-      # Host build tools
-      # ============================================================
-
-      - name: Install build dependencies
+      - name: Install host dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
-            python3 \
-            python3-pip \
-            python3-mako \
+            git \
             meson \
             ninja-build \
             pkg-config \
-            pkgconf \
+            python3 \
+            python3-pip \
+            python3-mako \
             bison \
             flex \
             gettext \
             cmake \
-            build-essential \
-            ccache \
-            unzip \
-            wget \
             curl \
-            git \
-            autoconf \
-            automake \
-            libtool \
+            wget \
             xz-utils \
-            tar \
-            file
-
-
-      # ============================================================
-      # Android NDK
-      # ============================================================
+            unzip \
+            ca-certificates
 
       - name: Download Android NDK
         run: |
           wget -q \
-            https://dl.google.com/android/repository/android-ndk-r27d-linux.zip \
-            -O android-ndk-r27d-linux.zip
+            https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip \
+            -O ndk.zip
 
+          mkdir -p "$NDK_DIR"
+          unzip -q ndk.zip -d "$NDK_DIR.tmp"
+          mv "$NDK_DIR.tmp/android-ndk-${NDK_VERSION}" "$NDK_DIR"
+          rm -rf "$NDK_DIR.tmp" ndk.zip
 
-      - name: Verify Android NDK
-        run: |
-          echo \
-            "22105e410cf29afcf163760cc95522b9fb981121  android-ndk-r27d-linux.zip" \
-            | sha1sum -c -
-
-
-      - name: Extract Android NDK
-        run: |
-          unzip -q android-ndk-r27d-linux.zip
-
-          test -d "$NDK_DIR"
-
-          echo "NDK:"
-          "$NDK_DIR/ndk-build" --version
-
-
-      # ============================================================
-      # Android ARM64 toolchain
-      # ============================================================
-
-      - name: Verify Android ARM64 toolchain
-        run: |
-          TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
-
-          test -x \
-            "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
-
-          test -x \
-            "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
-
-          test -x "$TOOLCHAIN/bin/llvm-ar"
-          test -x "$TOOLCHAIN/bin/llvm-ranlib"
-          test -x "$TOOLCHAIN/bin/llvm-strip"
-          test -x "$TOOLCHAIN/bin/ld.lld"
-
-          "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang" \
+          echo "NDK=$NDK_DIR"
+          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang" \
             --version
 
-          "$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++" \
-            --version
-
-          "$TOOLCHAIN/bin/ld.lld" --version
-
-
-      # ============================================================
-      # Android X11/XCB sysroot
+      # ------------------------------------------------------------
+      # Termux ARM64/Bionic X11 dependencies
+      # ------------------------------------------------------------
       #
-      # We use Android/Termux packages, NOT Ubuntu x86_64 X11 libs.
-      # ============================================================
-
-      - name: Prepare Android X11 sysroot
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p "$PREFIX"
-          mkdir -p "$PREFIX/lib"
-          mkdir -p "$PREFIX/include"
-          mkdir -p "$PREFIX/share"
-          mkdir -p "$PREFIX/bin"
-
-          echo "Android X11 sysroot:"
-          echo "$PREFIX"
-
-
-      # ============================================================
-      # Download Termux package repository metadata
-      # ============================================================
-
-      - name: Download Android X11 package metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p termux-repo
-
-          BASE="https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-aarch64"
-
-          curl -L --fail \
-            "$BASE/Packages.xz" \
-            -o termux-repo/Packages.xz
-
-          unxz -f termux-repo/Packages.xz
-
-          test -s termux-repo/Packages
-
-          echo "Termux package metadata downloaded."
-
-
-      # ============================================================
-      # Helper: download + extract a Termux .deb
-      # ============================================================
-
-      - name: Create Termux package installer
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cat > "$GITHUB_WORKSPACE/install-termux-package.sh" <<'SH'
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          PKG="$1"
-
-          BASE="https://packages.termux.dev/apt/termux-main/pool/main"
-
-          FILE="$(
-            awk -v pkg="$PKG" '
-              $1 == "Package:" && $2 == pkg { found=1 }
-              found && $1 == "Filename:" { print $2; exit }
-            ' termux-repo/Packages
-          )"
-
-          if [ -z "$FILE" ]; then
-            echo "ERROR: Could not find Termux package: $PKG"
-            exit 1
-          fi
-
-          URL="${BASE}/${FILE}"
-
-          echo "Downloading:"
-          echo "  $PKG"
-          echo "  $URL"
-
-          mkdir -p termux-debs
-          mkdir -p "$PREFIX"
-
-          DEB="termux-debs/$(basename "$FILE")"
-
-          curl -L --fail \
-            "$URL" \
-            -o "$DEB"
-
-          mkdir -p termux-extract
-
-          dpkg-deb -x "$DEB" termux-extract
-
-          cp -a termux-extract/. "$PREFIX/"
-
-          rm -rf termux-extract
-
-          echo "Installed: $PKG"
-          SH
-
-          chmod +x "$GITHUB_WORKSPACE/install-termux-package.sh"
-
-
-      # ============================================================
-      # X11/XCB dependencies
+      # IMPORTANT:
+      # Ubuntu x86_64 X11 libraries cannot be linked into the
+      # Android ARM64 target. We therefore download ARM64 packages
+      # from Termux repositories and use their headers/libs/pkgconfig.
       #
-      # These are Android/ARM64 packages.
-      # ============================================================
-
-      - name: Install Android X11 dependencies
+      - name: Download Termux ARM64 repositories
         shell: bash
         run: |
           set -euo pipefail
 
-          export PATH="$PREFIX/bin:$PATH"
+          mkdir -p "$GITHUB_WORKSPACE/termux-root"
+          mkdir -p "$GITHUB_WORKSPACE/termux-cache"
 
-          install_pkg() {
-            "$GITHUB_WORKSPACE/install-termux-package.sh" "$1"
+          cd "$GITHUB_WORKSPACE/termux-cache"
+
+          # Official Termux repositories
+          MAIN_REPO="https://packages-cf.termux.dev/apt/termux-main"
+          X11_REPO="https://packages-cf.termux.dev/apt/termux-x11"
+
+          # Download repository metadata.
+          #
+          # Termux repository metadata has changed format over time,
+          # so try compressed formats instead of assuming one filename.
+          fetch_index() {
+            local repo="$1"
+            local dist="$2"
+            local out="$3"
+
+            for file in Packages.xz Packages.gz Packages; do
+              url="${repo}/dists/${dist}/main/binary-aarch64/${file}"
+
+              echo "Trying: $url"
+
+              if curl -fL --retry 5 --retry-delay 2 \
+                   "$url" -o "$out.tmp"; then
+
+                case "$file" in
+                  Packages.xz)
+                    xz -dc "$out.tmp" > "$out"
+                    ;;
+                  Packages.gz)
+                    gzip -dc "$out.tmp" > "$out"
+                    ;;
+                  Packages)
+                    cp "$out.tmp" "$out"
+                    ;;
+                esac
+
+                rm -f "$out.tmp"
+
+                if [ -s "$out" ]; then
+                  echo "Downloaded $url"
+                  return 0
+                fi
+              fi
+
+              rm -f "$out.tmp"
+            done
+
+            echo "ERROR: unable to download package index from $repo"
+            return 1
           }
 
-          # Base X11 protocol/data dependencies
-          install_pkg xorgproto
-          install_pkg xcb-proto
+          fetch_index \
+            "$MAIN_REPO" \
+            stable \
+            main-Packages
 
-          # X11 authentication / transport
-          install_pkg libxau
-          install_pkg libxdmcp
-          install_pkg xtrans
+          fetch_index \
+            "$X11_REPO" \
+            x11 \
+            x11-Packages
 
-          # Core XCB
-          install_pkg libxcb
+          echo "Repository indexes downloaded:"
+          wc -l main-Packages x11-Packages
 
-          # X11 client
-          install_pkg libx11
-
-          # X11/XCB bridge
-          install_pkg libx11-xcb
-
-          # X11 extensions needed by Mesa WSI
-          install_pkg libxext
-          install_pkg libxfixes
-          install_pkg libxrandr
-          install_pkg libxrender
-
-          # Shared-memory fence
-          install_pkg libxshmfence
-
-          echo
-          echo "=== Android X11 libraries ==="
-          find "$PREFIX/lib" \
-            -maxdepth 1 \
-            -type f \
-            \( \
-              -name 'libX11.so*' \
-              -o \
-              -name 'libxcb.so*' \
-              -o \
-              -name 'libXrandr.so*' \
-              -o \
-              -name 'libXfixes.so*' \
-              -o \
-              -name 'libXext.so*' \
-              -o \
-              -name 'libXshmfence.so*' \
-            \) \
-            -print
-
-
-      # ============================================================
-      # Fix pkg-config paths for the staged Android sysroot
-      # ============================================================
-
-      - name: Configure Android pkg-config
+      - name: Download ARM64 X11 dependencies
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p "$PREFIX/lib/pkgconfig"
-          mkdir -p "$PREFIX/share/pkgconfig"
+          ROOT="$GITHUB_WORKSPACE/termux-root"
+          CACHE="$GITHUB_WORKSPACE/termux-cache"
 
-          # Termux .pc files contain Termux's normal prefix.
-          # Rewrite it to our GitHub Actions sysroot.
-          find "$PREFIX" \
-            -type f \
-            \( -name '*.pc' -o -name '*.pc.in' \) \
-            -print0 |
-          while IFS= read -r -d '' f; do
-            sed -i \
-              -e "s|/data/data/com.termux/files/usr|$PREFIX|g" \
-              "$f"
+          mkdir -p "$ROOT"
+
+          MAIN_REPO="https://packages-cf.termux.dev/apt/termux-main"
+          X11_REPO="https://packages-cf.termux.dev/apt/termux-x11"
+
+          cd "$CACHE"
+
+          # Packages needed by Mesa Vulkan X11 WSI.
+          #
+          # Do not use Debian/Ubuntu package names here.
+          # These are Termux package names.
+          PACKAGES="
+          libx11
+          libxext
+          libxfixes
+          libxrandr
+          libxrender
+          libxcb
+          libxshmfence
+          xorgproto
+          libxau
+          libxdmcp
+          libandroid-support
+          "
+
+          find_package() {
+            local pkg="$1"
+
+            awk -v pkg="$pkg" '
+              BEGIN {
+                RS=""
+                FS="\n"
+              }
+              {
+                name=""
+                filename=""
+                arch=""
+
+                for (i=1; i<=NF; i++) {
+                  if ($i ~ /^Package: /)
+                    name=substr($i,10)
+
+                  if ($i ~ /^Filename: /)
+                    filename=substr($i,11)
+
+                  if ($i ~ /^Architecture: /)
+                    arch=substr($i,15)
+                }
+
+                if (name == pkg && arch == "aarch64" && filename != "") {
+                  print filename
+                  exit
+                }
+              }
+            ' main-Packages
+
+            awk -v pkg="$pkg" '
+              BEGIN {
+                RS=""
+                FS="\n"
+              }
+              {
+                name=""
+                filename=""
+                arch=""
+
+                for (i=1; i<=NF; i++) {
+                  if ($i ~ /^Package: /)
+                    name=substr($i,10)
+
+                  if ($i ~ /^Filename: /)
+                    filename=substr($i,11)
+
+                  if ($i ~ /^Architecture: /)
+                    arch=substr($i,15)
+                }
+
+                if (name == pkg && arch == "aarch64" && filename != "") {
+                  print filename
+                  exit
+                }
+              }
+            ' x11-Packages
+          }
+
+          download_package() {
+            local pkg="$1"
+            local filename=""
+            local repo=""
+
+            filename=$(awk -v pkg="$pkg" '
+              BEGIN { RS=""; FS="\n" }
+              {
+                name=""
+                file=""
+                arch=""
+
+                for (i=1; i<=NF; i++) {
+                  if ($i ~ /^Package: /)
+                    name=substr($i,10)
+                  else if ($i ~ /^Filename: /)
+                    file=substr($i,11)
+                  else if ($i ~ /^Architecture: /)
+                    arch=substr($i,15)
+                }
+
+                if (name == pkg && arch == "aarch64" && file != "") {
+                  print file
+                  exit
+                }
+              }
+            ' main-Packages)
+
+            if [ -n "$filename" ]; then
+              repo="$MAIN_REPO"
+            else
+              filename=$(awk -v pkg="$pkg" '
+                BEGIN { RS=""; FS="\n" }
+                {
+                  name=""
+                  file=""
+                  arch=""
+
+                  for (i=1; i<=NF; i++) {
+                    if ($i ~ /^Package: /)
+                      name=substr($i,10)
+                    else if ($i ~ /^Filename: /)
+                      file=substr($i,11)
+                    else if ($i ~ /^Architecture: /)
+                      arch=substr($i,15)
+                  }
+
+                  if (name == pkg && arch == "aarch64" && file != "") {
+                    print file
+                    exit
+                  }
+                }
+              ' x11-Packages)
+
+              repo="$X11_REPO"
+            fi
+
+            if [ -z "$filename" ]; then
+              echo "ERROR: package not found: $pkg"
+              return 1
+            fi
+
+            echo "Package: $pkg"
+            echo "Filename: $filename"
+            echo "Repository: $repo"
+
+            curl -fL --retry 5 --retry-delay 2 \
+              "$repo/$filename" \
+              -o "$(basename "$filename")"
+          }
+
+          for pkg in $PACKAGES; do
+            download_package "$pkg"
           done
 
-          cat > "$GITHUB_WORKSPACE/android-pkg-config" <<'SH'
-          #!/usr/bin/env bash
-          export PKG_CONFIG_SYSROOT_DIR="${PREFIX}"
-          export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
-          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
+          ls -lh *.deb
 
-          exec pkgconf "$@"
-          SH
+      - name: Extract Termux packages
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          chmod +x "$GITHUB_WORKSPACE/android-pkg-config"
+          ROOT="$GITHUB_WORKSPACE/termux-root"
+          CACHE="$GITHUB_WORKSPACE/termux-cache"
 
-          echo "PKG_CONFIG_SYSROOT_DIR=$PREFIX"
-          echo "PKG_CONFIG_LIBDIR=$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig"
+          mkdir -p "$ROOT"
 
-          echo
-          echo "=== X11 pkg-config files ==="
+          cd "$CACHE"
 
-          find "$PREFIX" \
+          for deb in *.deb; do
+            echo "Extracting $deb"
+
+            tmp="$ROOT/.tmp"
+            rm -rf "$tmp"
+            mkdir -p "$tmp"
+
+            ar x "$deb" --output "$tmp"
+
+            data_archive=$(find "$tmp" -maxdepth 1 \
+              \( -name 'data.tar.xz' \
+              -o -name 'data.tar.zst' \
+              -o -name 'data.tar.gz' \) \
+              | head -n1)
+
+            if [ -z "$data_archive" ]; then
+              echo "ERROR: no data archive in $deb"
+              exit 1
+            fi
+
+            tar -xf "$data_archive" -C "$ROOT"
+
+            rm -rf "$tmp"
+          done
+
+          rm -rf "$ROOT/.tmp"
+
+          echo "Termux sysroot:"
+          find "$ROOT" -maxdepth 3 -type d | sort | head -100
+
+      - name: Prepare Android ARM64 pkg-config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT="$GITHUB_WORKSPACE/termux-root"
+
+          mkdir -p "$ROOT/usr/lib/pkgconfig"
+          mkdir -p "$ROOT/usr/share/pkgconfig"
+
+          # Termux normally installs .pc files here.
+          find "$ROOT" \
             -type f \
-            -name '*.pc' \
+            \( -name '*.pc' -o -name '*.la' \) \
             | sort
 
+          echo "PKG_CONFIG_LIBDIR=$ROOT/usr/lib/pkgconfig:$ROOT/usr/share/pkgconfig" \
+            >> "$GITHUB_ENV"
 
-      # ============================================================
-      # Verify target dependencies
-      # ============================================================
+          echo "PKG_CONFIG_SYSROOT_DIR=$ROOT" \
+            >> "$GITHUB_ENV"
 
-      - name: Verify Android X11 dependencies
+      - name: Verify X11 ARM64 dependencies
         shell: bash
         run: |
           set -euo pipefail
 
-          export PREFIX="$PREFIX"
+          ROOT="$GITHUB_WORKSPACE/termux-root"
 
-          PKG="$GITHUB_WORKSPACE/android-pkg-config"
+          export PKG_CONFIG_LIBDIR="$ROOT/usr/lib/pkgconfig:$ROOT/usr/share/pkgconfig"
+          export PKG_CONFIG_SYSROOT_DIR="$ROOT"
 
-          echo "=== libxcb ==="
-          "$PKG" --modversion xcb
+          echo "=== pkg-config ==="
 
-          echo "=== x11-xcb ==="
-          "$PKG" --modversion x11-xcb
+          for pc in \
+            xcb \
+            x11 \
+            x11-xcb \
+            xcb-dri3 \
+            xcb-present \
+            xcb-xfixes \
+            xcb-sync \
+            xcb-randr \
+            xcb-shm \
+            xshmfence
+          do
+            echo
+            echo "---- $pc ----"
+            pkg-config --modversion "$pc" || true
+          done
 
-          echo "=== xcb-dri3 ==="
-          "$PKG" --modversion xcb-dri3
-
-          echo "=== xcb-present ==="
-          "$PKG" --modversion xcb-present
-
-          echo "=== xcb-xfixes ==="
-          "$PKG" --modversion xcb-xfixes
-
-          echo "=== xcb-sync ==="
-          "$PKG" --modversion xcb-sync
-
-          echo "=== xcb-randr ==="
-          "$PKG" --modversion xcb-randr
-
-          echo "=== xcb-shm ==="
-          "$PKG" --modversion xcb-shm
-
-          echo "=== xshmfence ==="
-          "$PKG" --modversion xshmfence
-
-          echo
-          echo "=== libxcb compiler flags ==="
-          "$PKG" --cflags xcb
-
-          echo
-          echo "=== libxcb linker flags ==="
-          "$PKG" --libs xcb
-
-
-      # ============================================================
-      # Force-enable Mesa Vulkan wrapper
-      # ============================================================
-
-      - name: Enable Mesa Vulkan wrapper
+      - name: Force enable Vulkan wrapper
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          from pathlib import Path
+          FILE="src/vulkan/meson.build"
 
-          p = Path("src/vulkan/meson.build")
-          s = p.read_text()
+          if ! grep -q 'with_wrapper_vk = true' "$FILE"; then
+            sed -i '1i with_wrapper_vk = true' "$FILE"
+          fi
 
-          marker = "vk_api_xml = files('registry/vk.xml')"
+          grep -n "with_wrapper_vk" "$FILE" | head
 
-          if "with_wrapper_vk = true" not in s:
-              if marker not in s:
-                  raise SystemExit(
-                      "Could not find src/vulkan/meson.build insertion point"
-                  )
-
-              s = s.replace(
-                  marker,
-                  "# CI: force-enable Vulkan wrapper\n"
-                  "with_wrapper_vk = true\n\n"
-                  + marker,
-                  1,
-              )
-
-              p.write_text(s)
-
-          print("with_wrapper_vk forced to true")
-          PY
-
-          grep -n "with_wrapper_vk" src/vulkan/meson.build
-
-
-      # ============================================================
-      # Meson cross file
-      # ============================================================
-
-      - name: Create Android ARM64 cross file
+      - name: Create Meson cross file
         shell: bash
         run: |
-          set -euo pipefail
+          mkdir -p build
 
-          mkdir -p .ci
-
-          cat > .ci/android-aarch64.ini <<EOF
+          cat > build/android-arm64.ini <<'EOF'
           [constants]
-          ndk = '${NDK_DIR}'
-          sysroot = '${PREFIX}'
+          ndk = '/home/runner/work/mesa/mesa/android-ndk'
           toolchain = ndk / 'toolchains/llvm/prebuilt/linux-x86_64'
+          sysroot = ndk / 'toolchains/llvm/prebuilt/linux-x86_64/sysroot'
 
           [binaries]
-          c = toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang'
-          cpp = toolchain / 'bin/aarch64-linux-android${ANDROID_API}-clang++'
+          c = toolchain / 'bin/aarch64-linux-android34-clang'
+          cpp = toolchain / 'bin/aarch64-linux-android34-clang++'
           ar = toolchain / 'bin/llvm-ar'
           ranlib = toolchain / 'bin/llvm-ranlib'
           strip = toolchain / 'bin/llvm-strip'
           ld = toolchain / 'bin/ld.lld'
-
-          pkg-config = '${GITHUB_WORKSPACE}/android-pkg-config'
+          pkg-config = '/usr/bin/pkg-config'
 
           [built-in options]
           c_args = [
             '--sysroot=' + sysroot,
-            '-I' + sysroot / 'include'
+            '-I/home/runner/work/mesa/mesa/termux-root/usr/include'
           ]
 
           cpp_args = [
             '--sysroot=' + sysroot,
-            '-I' + sysroot / 'include'
+            '-I/home/runner/work/mesa/mesa/termux-root/usr/include'
           ]
 
           c_link_args = [
             '--sysroot=' + sysroot,
-            '-L' + sysroot / 'lib'
+            '-L/home/runner/work/mesa/mesa/termux-root/usr/lib'
           ]
 
           cpp_link_args = [
             '--sysroot=' + sysroot,
-            '-L' + sysroot / 'lib'
+            '-L/home/runner/work/mesa/mesa/termux-root/usr/lib'
           ]
 
           [host_machine]
@@ -475,149 +458,62 @@ jobs:
           endian = 'little'
           EOF
 
-          cat .ci/android-aarch64.ini
-
-
-      # ============================================================
-      # Mesa configuration
-      # ============================================================
-
       - name: Configure Mesa
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf build
+          ROOT="$GITHUB_WORKSPACE/termux-root"
 
-          export PREFIX="$PREFIX"
+          export PKG_CONFIG_LIBDIR="$ROOT/usr/lib/pkgconfig:$ROOT/usr/share/pkgconfig"
+          export PKG_CONFIG_SYSROOT_DIR="$ROOT"
 
           meson setup build \
-            --cross-file .ci/android-aarch64.ini \
-            --buildtype=release \
-            --strip \
-            -Dprefix="$PREFIX" \
+            --cross-file build/android-arm64.ini \
             -Dplatforms=x11 \
             -Dglx=disabled \
             -Ddefault_library=shared \
             -Dvulkan-drivers= \
-            -Dgallium-drivers=
-
-
-      # ============================================================
-      # Build
-      # ============================================================
+            -Dgallium-drivers= \
+            -Dbuildtype=release
 
       - name: Build
-        shell: bash
         run: |
-          set -euo pipefail
+          meson compile -C build -j2
 
-          ninja -C build -j"$(nproc)"
-
-
-      # ============================================================
-      # Locate wrapper
-      # ============================================================
-
-      - name: Locate Vulkan wrapper
-        shell: bash
+      - name: Find wrapper
         run: |
-          set -euo pipefail
-
-          echo "=== Wrapper ==="
-
-          find build \
-            -type f \
-            \( \
-              -name 'libvulkan_wrapper.so' \
-              -o \
-              -name '*vulkan_wrapper*.so*' \
-            \) \
+          find build -type f \
+            \( -name 'libvulkan_wrapper.so' \
+            -o -name '*vulkan*wrapper*.so' \) \
             -print
 
-          echo
-          echo "=== Vulkan build outputs ==="
-
-          find build/src/vulkan \
-            -type f \
-            -print \
-            2>/dev/null || true
-
-
-      # ============================================================
-      # Verify Android ARM64 ELF
-      # ============================================================
-
-      - name: Verify output architecture
+      - name: Package
         shell: bash
         run: |
           set -euo pipefail
 
-          WRAPPER="$(
-            find build \
-              -type f \
-              -name 'libvulkan_wrapper.so' \
-              | head -n 1
-          )"
+          mkdir -p artifact/lib
+
+          WRAPPER=$(find build -type f \
+            -name 'libvulkan_wrapper.so' \
+            | head -n1)
 
           if [ -z "$WRAPPER" ]; then
-            echo "ERROR: libvulkan_wrapper.so was not produced"
+            echo "ERROR: libvulkan_wrapper.so not found"
             exit 1
           fi
 
-          echo "Wrapper: $WRAPPER"
+          cp "$WRAPPER" artifact/lib/libvulkan_wrapper.so
 
-          file "$WRAPPER"
+          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-readelf" \
+            -h artifact/lib/libvulkan_wrapper.so \
+            || readelf -h artifact/lib/libvulkan_wrapper.so
 
-          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-            -h "$WRAPPER" |
-            grep -E \
-              'Class:|Machine:|OS/ABI:'
+          file artifact/lib/libvulkan_wrapper.so
 
-          echo
-          echo "=== Needed libraries ==="
-
-          "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
-            -d "$WRAPPER" |
-            grep NEEDED || true
-
-
-      # ============================================================
-      # Package
-      # ============================================================
-
-      - name: Package wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p artifacts
-
-          WRAPPER="$(
-            find build \
-              -type f \
-              -name 'libvulkan_wrapper.so' \
-              | head -n 1
-          )"
-
-          if [ -z "$WRAPPER" ]; then
-            echo "ERROR: wrapper library not found"
-            exit 1
-          fi
-
-          cp "$WRAPPER" \
-            artifacts/libvulkan_wrapper.so
-
-          echo "=== Artifact ==="
-          ls -lh artifacts/
-
-
-      # ============================================================
-      # Upload
-      # ============================================================
-
-      - name: Upload wrapper
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vulkan-wrapper-android-arm64-x11
-          path: artifacts/libvulkan_wrapper.so
+          name: mesa-vulkan-wrapper-android-arm64-x11
+          path: artifact/
