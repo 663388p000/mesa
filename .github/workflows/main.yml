@@ -25,7 +25,6 @@ jobs:
             ninja-build \
             pkg-config \
             python3 \
-            python3-pip \
             wget \
             unzip \
             file
@@ -53,11 +52,12 @@ jobs:
         run: |
           set -e
 
+          rm -rf "$ROOT"
           mkdir -p "$ROOT"
 
           BASE="https://packages-cf.termux.dev:443/apt/termux-main"
 
-          wget -q \
+          wget -q --show-progress \
             "$BASE/dists/stable/main/binary-aarch64/Packages.gz" \
             -O /tmp/Packages.gz
 
@@ -81,20 +81,32 @@ jobs:
               exit 1
             fi
 
+            DEB="/tmp/$(basename "$FILE")"
+
             echo "Downloading $PKG"
+
             wget -q --show-progress \
               "$BASE/$FILE" \
-              -O "/tmp/$(basename "$FILE")"
+              -O "$DEB"
 
+            rm -rf /tmp/pkg
             mkdir -p /tmp/pkg
-            rm -rf /tmp/pkg/*
 
-            ar x "/tmp/$(basename "$FILE")" \
-              data.tar.* \
-              --output /tmp/pkg
+            cd /tmp/pkg
+            ar x "$DEB"
 
-            tar -xf /tmp/pkg/data.tar.* \
-              -C "$ROOT"
+            DATA=$(find . -maxdepth 1 -type f \
+              -name 'data.tar.*' | head -n 1)
+
+            if [ -z "$DATA" ]; then
+              echo "ERROR: data archive not found:"
+              ar t "$DEB"
+              exit 1
+            fi
+
+            tar -xf "$DATA" -C "$ROOT"
+
+            cd "$GITHUB_WORKSPACE"
           }
 
           download_pkg libandroid-support
@@ -110,8 +122,10 @@ jobs:
           download_pkg xorgproto
           download_pkg xcb-proto
 
-          echo "===== Installed X11 files ====="
-          find "$ROOT/usr" -maxdepth 4 -type f | sort
+          echo "===== XCB ====="
+          find "$ROOT/usr" \
+            \( -name 'xcb.pc' -o -name 'libxcb.so*' \) \
+            -print
 
       - name: Check pkg-config
         env:
@@ -125,9 +139,6 @@ jobs:
 
           echo "===== xcb.pc ====="
           find "$ROOT/usr" -name 'xcb.pc' -print
-
-          test -f "$ROOT/usr/lib/pkgconfig/xcb.pc" \
-            || test -f "$ROOT/usr/share/pkgconfig/xcb.pc"
 
           echo "===== pkg-config xcb ====="
           pkg-config --modversion xcb
@@ -150,27 +161,25 @@ jobs:
           mkdir -p build
 
           cat > build/android-arm64.ini <<EOF
-          [binaries]
-          c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
-          cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
-          ar = '$TOOLCHAIN/bin/llvm-ar'
-          strip = '$TOOLCHAIN/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
+[binaries]
+c = '$TOOLCHAIN/bin/aarch64-linux-android34-clang'
+cpp = '$TOOLCHAIN/bin/aarch64-linux-android34-clang++'
+ar = '$TOOLCHAIN/bin/llvm-ar'
+strip = '$TOOLCHAIN/bin/llvm-strip'
+pkg-config = '/usr/bin/pkg-config'
 
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8'
-          endian = 'little'
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8'
+endian = 'little'
 
-          [built-in options]
-          c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-          cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
-          c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-          cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
-          EOF
-
-          sed -i 's/^          //' build/android-arm64.ini
+[built-in options]
+c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+EOF
 
           cat build/android-arm64.ini
 
