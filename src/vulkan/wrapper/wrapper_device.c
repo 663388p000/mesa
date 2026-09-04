@@ -1,4 +1,7 @@
 #include <sys/stat.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "wrapper_private.h"
 #include "wrapper_log.h"
@@ -16,6 +19,41 @@
 #include "util/list.h"
 #include "util/simple_mtx.h"
 
+#define WRAPPER_ARRAY_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
+
+/*
+ * ---------------------------------------------------------------------
+ * Extension policy
+ * ---------------------------------------------------------------------
+ *
+ * wrapper_device_extensions    - extensions the wrapper itself owns,
+ *                                 emulates, or otherwise always wants
+ *                                 advertised. Never re-added by the
+ *                                 "enable everything" pass below.
+ *
+ * wrapper_mandatory_extensions - extensions device creation *requires*
+ *                                 unconditionally from the underlying
+ *                                 driver (currently just
+ *                                 buffer_device_address). Checked and
+ *                                 force-enabled explicitly in
+ *                                 wrapper_CreateDevice(); skipped by
+ *                                 the "enable everything" pass so they
+ *                                 are never added twice.
+ *
+ * wrapper_filter_extensions    - extensions the wrapper deliberately
+ *                                 withholds from the driver.
+ *
+ * wrapper_known_bugs           - a small, explicit table of extensions
+ *                                 withheld only on specific driver IDs
+ *                                 because of a known, real bug there.
+ *
+ * Separately, wrapper_mali_valhall_table + the wrapper_mali_* helpers
+ * below implement a *conditionally* mandatory set (dynamic rendering +
+ * multiview) that only applies to Mali Valhall GPUs with more than one
+ * shader core (MC2/MP2 and above) -- see wrapper_mali_requires_dynamic_rendering().
+ * ---------------------------------------------------------------------
+ */
+
 const struct vk_device_extension_table wrapper_device_extensions =
 {
    .KHR_swapchain = true,
@@ -27,6 +65,25 @@ const struct vk_device_extension_table wrapper_device_extensions =
    .KHR_present_id = true,
    .KHR_present_wait = true,
    .KHR_incremental_present = true,
+   .KHR_driver_properties = true,
+   .KHR_device_group = true,
+   .KHR_image_format_list = true,
+   .KHR_zero_initialize_workgroup_memory = true,
+   .EXT_multisampled_render_to_single_sampled = true,
+};
+
+const struct vk_device_extension_table wrapper_mandatory_extensions =
+{
+   .KHR_buffer_device_address = true,
+   /*
+    * Skipped here so wrapper_enable_all_driver_extensions() never
+    * double-adds them; actually requested/enforced only when
+    * wrapper_mali_requires_dynamic_rendering() is true (see below).
+    */
+   .KHR_dynamic_rendering = true,
+   .KHR_dynamic_rendering_local_read = true,
+   .EXT_dynamic_rendering_unused_attachments = true,
+   .KHR_multiview = true,
 };
 
 const struct vk_device_extension_table wrapper_filter_extensions =
@@ -36,6 +93,292 @@ const struct vk_device_extension_table wrapper_filter_extensions =
    .KHR_shared_presentable_image = true,
    .EXT_image_compression_control_swapchain = true,
 };
+
+struct wrapper_known_bug_entry {
+   VkDriverId driver_id;
+   const char *extension_name;
+   const char *note;
+};
+
+/*
+ * Keep this table short and evidence-based. Each entry should map to
+ * a genuinely observed, driver-specific bug -- not a hunch. Gate the
+ * whole mechanism behind WRAPPER_IGNORE_KNOWN_BUGS=1 for bisecting.
+ */
+static const struct wrapper_known_bug_entry wrapper_known_bugs[] = {
+   {
+      .driver_id = VK_DRIVER_ID_ARM_PROPRIETARY,
+      .extension_name = "VK_EXT_transform_feedback",
+      .note = "Unstable transform feedback + robustness2 interaction on some Mali driver builds",
+   },
+   {
+      .driver_id = VK_DRIVER_ID_QUALCOMM_PROPRIETARY,
+      .extension_name = "VK_EXT_multisampled_render_to_single_sampled",
+      .note = "Resolve-target corruption observed on some legacy Adreno driver builds",
+   },
+};
+
+static bool
+wrapper_extension_has_known_bug(struct wrapper_physical_device *pdevice,
+                                const char *extension_name)
+{
+   static int wrapper_ignore_known_bugs = -1;
+
+   if (wrapper_ignore_known_bugs == -1) {
+      wrapper_ignore_known_bugs = getenv("WRAPPER_IGNORE_KNOWN_BUGS") ?
+         atoi(getenv("WRAPPER_IGNORE_KNOWN_BUGS")) : 0;
+   }
+
+   if (wrapper_ignore_known_bugs)
+      return false;
+
+   VkDriverId driver_id = pdevice->driver_properties.driverID;
+
+   for (size_t i = 0; i < WRAPPER_ARRAY_LEN(wrapper_known_bugs); i++) {
+      if (wrapper_known_bugs[i].driver_id != driver_id)
+         continue;
+      if (strcmp(wrapper_known_bugs[i].extension_name, extension_name) != 0)
+         continue;
+
+      WRAPPER_LOG(info, "Withholding %s: %s", extension_name,
+                  wrapper_known_bugs[i].note);
+      return true;
+   }
+
+   return false;
+}
+
+/*
+ * ---------------------------------------------------------------------
+ * Mali Valhall GPU / driver identification
+ * ---------------------------------------------------------------------
+ *
+ * GPU id is *never* assumed -- it is always read back from the device
+ * via VkPhysicalDeviceProperties.deviceID (which on the ARM proprietary
+ * driver carries the raw GPU_ID register value; the upper 16 bits are
+ * the product id used below), gated on vendorID/driverID actually being
+ * ARM/Mali first. Only once that identity is confirmed do we consult
+ * the table and decide what to enforce.
+ * ---------------------------------------------------------------------
+ */
+
+#define WRAPPER_MALI_VENDOR_ID 0x13B5
+
+struct wrapper_mali_gpu_entry {
+   const char *name;
+   const char *architecture;
+   uint16_t product_id;    /* upper 16 bits of the raw GPU_ID register */
+   uint32_t model_id_raw;  /* full raw GPU_ID register value */
+};
+
+static const struct wrapper_mali_gpu_entry wrapper_mali_valhall_table[] = {
+   { "Mali-G57",   "Valhall v9",  0x9001, 0x90010000 },
+   { "Mali-G57",   "Valhall v9",  0x9003, 0x90030000 },
+   { "Mali-G68",   "Valhall v9",  0x9004, 0x90040000 },
+   { "Mali-G77",   "Valhall v9",  0x9000, 0x90000000 },
+   { "Mali-G78",   "Valhall v9",  0x9002, 0x90020000 },
+   { "Mali-G78AE", "Valhall v9",  0x9005, 0x90050000 },
+   { "Mali-G310",  "Valhall v10", 0xA004, 0xA0040000 },
+   { "Mali-G510",  "Valhall v10", 0xA003, 0xA0030000 },
+   { "Mali-G610",  "Valhall v10", 0xA007, 0xA0070000 },
+   { "Mali-G710",  "Valhall v10", 0xA002, 0xA0020000 },
+   { "Mali-G615",  "Valhall v11", 0xB003, 0xB0030000 },
+   { "Mali-G715",  "Valhall v11", 0xB002, 0xB0020000 },
+};
+
+/* Step 1: confirm this is actually an ARM Mali device, then look the
+ * driver-reported GPU id up in the Valhall table. Returns NULL for
+ * anything that isn't ARM/Mali or isn't a recognized Valhall part. */
+static const struct wrapper_mali_gpu_entry *
+wrapper_lookup_mali_gpu(struct wrapper_physical_device *pdevice)
+{
+   if (pdevice->properties2.properties.vendorID != WRAPPER_MALI_VENDOR_ID)
+      return NULL;
+
+   if (pdevice->driver_properties.driverID != VK_DRIVER_ID_ARM_PROPRIETARY)
+      return NULL;
+
+   uint32_t gpu_id = pdevice->properties2.properties.deviceID;
+   uint16_t product_id = (uint16_t)(gpu_id >> 16);
+
+   for (size_t i = 0; i < WRAPPER_ARRAY_LEN(wrapper_mali_valhall_table); i++) {
+      if (wrapper_mali_valhall_table[i].product_id == product_id)
+         return &wrapper_mali_valhall_table[i];
+   }
+
+   return NULL;
+}
+
+/* Step 2: once we know it's a Valhall part, read the shader-core count
+ * off the driver-reported name string ("Mali-G710 MC10", or the older
+ * "MPx" naming). Never guessed -- if the driver doesn't report a count
+ * we treat it as unknown and do not enforce anything. */
+static int
+wrapper_mali_core_count(struct wrapper_physical_device *pdevice)
+{
+   const char *name = pdevice->properties2.properties.deviceName;
+
+   const char *suffix = strstr(name, "MC");
+   if (!suffix)
+      suffix = strstr(name, "MP");
+   if (!suffix)
+      return -1;
+
+   int count = atoi(suffix + 2);
+   return count > 0 ? count : -1;
+}
+
+/* Step 3: identify, then decide. Only Valhall GPUs reporting MC2/MP2
+ * or higher require dynamic rendering + multiview; MC1/MP1 and unknown
+ * core counts are exempt. */
+static bool
+wrapper_mali_requires_dynamic_rendering(struct wrapper_physical_device *pdevice)
+{
+   const struct wrapper_mali_gpu_entry *gpu = wrapper_lookup_mali_gpu(pdevice);
+   if (!gpu)
+      return false;
+
+   int core_count = wrapper_mali_core_count(pdevice);
+   if (core_count < 2)
+      return false;
+
+   WRAPPER_LOG(info,
+      "Detected %s (%s, GPU_ID 0x%08x, %d shader cores) -- enforcing "
+      "VK_KHR_dynamic_rendering / VK_KHR_dynamic_rendering_local_read / "
+      "VK_EXT_dynamic_rendering_unused_attachments / VK_KHR_multiview",
+      gpu->name, gpu->architecture,
+      pdevice->properties2.properties.deviceID, core_count);
+
+   return true;
+}
+
+/* Hard gate: device creation must not proceed if a Valhall MC2+ part
+ * is detected but the driver can't actually back the requirement. */
+static VkResult
+wrapper_check_valhall_mandatory_extensions(struct wrapper_physical_device *pdevice)
+{
+   bool have_dynamic_rendering =
+      pdevice->base_supported_extensions.KHR_dynamic_rendering ||
+      pdevice->properties2.properties.apiVersion >= VK_API_VERSION_1_3;
+   bool have_local_read =
+      pdevice->base_supported_extensions.KHR_dynamic_rendering_local_read;
+   bool have_unused_attachments =
+      pdevice->base_supported_extensions.EXT_dynamic_rendering_unused_attachments;
+   bool have_multiview =
+      pdevice->base_supported_extensions.KHR_multiview ||
+      pdevice->properties2.properties.apiVersion >= VK_API_VERSION_1_1;
+
+   if (!have_dynamic_rendering || !have_local_read ||
+       !have_unused_attachments || !have_multiview) {
+      WRAPPER_LOG(error,
+         "Mali Valhall MC2+ GPU detected but the driver is missing a "
+         "mandatory extension (dynamic_rendering=%d local_read=%d "
+         "unused_attachments=%d multiview=%d)",
+         have_dynamic_rendering, have_local_read,
+         have_unused_attachments, have_multiview);
+      return VK_ERROR_EXTENSION_NOT_PRESENT;
+   }
+
+   if (!pdevice->base_supported_features.dynamicRendering ||
+       !pdevice->base_supported_features.dynamicRenderingLocalRead ||
+       !pdevice->base_supported_features.dynamicRenderingUnusedAttachments ||
+       !pdevice->base_supported_features.multiview) {
+      WRAPPER_LOG(error,
+         "Mali Valhall MC2+ GPU detected but the driver does not expose "
+         "the matching feature bits");
+      return VK_ERROR_FEATURE_NOT_PRESENT;
+   }
+
+   return VK_SUCCESS;
+}
+
+static void
+wrapper_append_valhall_extensions(uint32_t *count, const char **exts)
+{
+   exts[(*count)++] = "VK_KHR_dynamic_rendering";
+   exts[(*count)++] = "VK_KHR_dynamic_rendering_local_read";
+   exts[(*count)++] = "VK_EXT_dynamic_rendering_unused_attachments";
+   exts[(*count)++] = "VK_KHR_multiview";
+}
+
+/*
+ * Force the four Valhall-mandatory feature bits on, the same
+ * "mutate in place if present, splice a struct in if not" pattern as
+ * wrapper_force_buffer_device_address() below. dynamicRendering and
+ * multiview are also recognized via their core-promoted aggregate
+ * structs (Vulkan 1.3 / 1.1 features) to avoid adding a redundant,
+ * spec-invalid duplicate struct when the app already requested the
+ * core version struct.
+ */
+static void
+wrapper_force_valhall_features(VkBaseInStructure *create_info,
+   VkPhysicalDeviceDynamicRenderingFeatures *dr_storage,
+   VkPhysicalDeviceDynamicRenderingLocalReadFeatures *drlr_storage,
+   VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT *dru_storage,
+   VkPhysicalDeviceMultiviewFeatures *mv_storage)
+{
+   bool have_dynamic_rendering = false;
+   bool have_local_read = false;
+   bool have_unused_attachments = false;
+   bool have_multiview = false;
+
+   for (VkBaseInStructure *current = (VkBaseInStructure *)create_info->pNext;
+        current != NULL; current = (VkBaseInStructure *)current->pNext) {
+      switch (current->sType) {
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
+         ((VkPhysicalDeviceVulkan13Features *)current)->dynamicRendering = VK_TRUE;
+         have_dynamic_rendering = true;
+         break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+         ((VkPhysicalDeviceVulkan11Features *)current)->multiview = VK_TRUE;
+         have_multiview = true;
+         break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES:
+         ((VkPhysicalDeviceDynamicRenderingFeatures *)current)->dynamicRendering = VK_TRUE;
+         have_dynamic_rendering = true;
+         break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES:
+         ((VkPhysicalDeviceDynamicRenderingLocalReadFeatures *)current)->dynamicRenderingLocalRead = VK_TRUE;
+         have_local_read = true;
+         break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT:
+         ((VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT *)current)->dynamicRenderingUnusedAttachments = VK_TRUE;
+         have_unused_attachments = true;
+         break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
+         ((VkPhysicalDeviceMultiviewFeatures *)current)->multiview = VK_TRUE;
+         have_multiview = true;
+         break;
+      default:
+         break;
+      }
+   }
+
+   if (!have_dynamic_rendering) {
+      dr_storage->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+      dr_storage->dynamicRendering = VK_TRUE;
+      dr_storage->pNext = create_info->pNext;
+      create_info->pNext = (VkBaseInStructure *)dr_storage;
+   }
+   if (!have_local_read) {
+      drlr_storage->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
+      drlr_storage->dynamicRenderingLocalRead = VK_TRUE;
+      drlr_storage->pNext = create_info->pNext;
+      create_info->pNext = (VkBaseInStructure *)drlr_storage;
+   }
+   if (!have_unused_attachments) {
+      dru_storage->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT;
+      dru_storage->dynamicRenderingUnusedAttachments = VK_TRUE;
+      dru_storage->pNext = create_info->pNext;
+      create_info->pNext = (VkBaseInStructure *)dru_storage;
+   }
+   if (!have_multiview) {
+      mv_storage->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
+      mv_storage->multiview = VK_TRUE;
+      mv_storage->pNext = create_info->pNext;
+      create_info->pNext = (VkBaseInStructure *)mv_storage;
+   }
+}
 
 static struct wrapper_buffer *
 get_wrapper_buffer_from_handle(struct wrapper_device *device, VkBuffer buffer) {
@@ -70,26 +413,45 @@ get_wrapper_fence_from_handle(struct wrapper_device *device, VkFence fence) {
    return wf;
 }
 
+/*
+ * Enable every extension the driver supports, beyond what the app
+ * explicitly asked for. This makes the wrapper transparently expose
+ * the full capability of the underlying driver rather than only the
+ * subset an app happened to request.
+ *
+ * Extensions already owned by the wrapper (wrapper_device_extensions),
+ * already mandatory (wrapper_mandatory_extensions -- handled via their
+ * own dedicated append/force paths instead), deliberately withheld
+ * (wrapper_filter_extensions), or flagged with a known driver bug are
+ * skipped here so each extension is only ever added to the enable
+ * list from a single place.
+ */
 static void
-wrapper_filter_enabled_extensions(const struct wrapper_device *device,
-                                  uint32_t *enable_extension_count,
-                                  const char **enable_extensions)
+wrapper_enable_all_driver_extensions(struct wrapper_device *device,
+                                     uint32_t *enable_extension_count,
+                                     const char **enable_extensions)
 {
-   for (int idx = 0; idx < VK_DEVICE_EXTENSION_COUNT; idx++) {
-      if (!device->vk.enabled_extensions.extensions[idx])
-         continue;
+   struct wrapper_physical_device *pdevice = device->physical;
 
-      if (!device->physical->base_supported_extensions.extensions[idx])
+   for (int idx = 0; idx < VK_DEVICE_EXTENSION_COUNT; idx++) {
+      if (!pdevice->base_supported_extensions.extensions[idx])
          continue;
 
       if (wrapper_device_extensions.extensions[idx])
          continue;
 
+      if (wrapper_mandatory_extensions.extensions[idx])
+         continue;
+
       if (wrapper_filter_extensions.extensions[idx])
          continue;
 
-      enable_extensions[(*enable_extension_count)++] =
-         vk_device_extensions[idx].extensionName;
+      const char *extension_name = vk_device_extensions[idx].extensionName;
+
+      if (wrapper_extension_has_known_bug(pdevice, extension_name))
+         continue;
+
+      enable_extensions[(*enable_extension_count)++] = extension_name;
    }
 }
 
@@ -119,6 +481,14 @@ wrapper_append_required_extensions(const struct vk_device *device,
    REQUIRED_EXTENSION(EXT_external_memory_dma_buf);
    REQUIRED_EXTENSION(EXT_image_drm_format_modifier);
    REQUIRED_EXTENSION(ANDROID_external_memory_android_hardware_buffer);
+   /* Mandatory for this wrapper -- checked/force-enabled explicitly in
+    * wrapper_CreateDevice(); listed here too so the extension *string*
+    * enable path stays consistent with every other required extension. */
+   REQUIRED_EXTENSION(KHR_buffer_device_address);
+   REQUIRED_EXTENSION(KHR_driver_properties);
+   REQUIRED_EXTENSION(KHR_device_group);
+   REQUIRED_EXTENSION(KHR_zero_initialize_workgroup_memory);
+   REQUIRED_EXTENSION(EXT_multisampled_render_to_single_sampled);
 #undef REQUIRED_EXTENSION
 }
 
@@ -129,6 +499,42 @@ static void unlink_vk_struct(VkBaseInStructure *create_info, const VkBaseInStruc
       (*prev)->pNext = (*current)->pNext;                                                
 
    *current = (*current)->pNext;
+}
+
+/*
+ * Force VK_KHR_buffer_device_address / core bufferDeviceAddress on.
+ * The wrapper treats this feature as mandatory and actually used
+ * internally, so it can't just be advertised -- it must be enabled
+ * regardless of whether (or how) the app asked for it.
+ *
+ * If the app's pNext chain already carries a struct with the bit,
+ * flip it in place (same "mutate the app's request" pattern already
+ * used by the DISABLE_FEATURE macro in wrapper_CreateDevice). If not,
+ * splice `storage` into the (already-copied) wrapper create-info
+ * chain. `storage` must outlive the driver's vkCreateDevice() call.
+ */
+static void
+wrapper_force_buffer_device_address(VkBaseInStructure *create_info,
+                                    VkPhysicalDeviceBufferDeviceAddressFeatures *storage)
+{
+   VkBaseInStructure *current = (VkBaseInStructure *)create_info->pNext;
+
+   while (current != NULL) {
+      if (current->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES) {
+         ((VkPhysicalDeviceBufferDeviceAddressFeatures *)current)->bufferDeviceAddress = VK_TRUE;
+         return;
+      }
+      if (current->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+         ((VkPhysicalDeviceVulkan12Features *)current)->bufferDeviceAddress = VK_TRUE;
+         return;
+      }
+      current = (VkBaseInStructure *)current->pNext;
+   }
+
+   storage->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+   storage->bufferDeviceAddress = VK_TRUE;
+   storage->pNext = create_info->pNext;
+   create_info->pNext = (VkBaseInStructure *)storage;
 }
 
 static void process_pnext_chain(VkBaseInStructure *create_info, struct wrapper_physical_device *pdevice) {
@@ -162,12 +568,42 @@ static void process_pnext_chain(VkBaseInStructure *create_info, struct wrapper_p
              WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan12Features from pNext chain");
              unlink_vk_struct(create_info, &current, &prev);
              continue;
-          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
-             if (api_version >= VK_MAKE_VERSION(1, 3, 0))
-                break;
-             WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan13Features from pNext chain");
-             unlink_vk_struct(create_info, &current, &prev);
-             continue;
+          case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES: {
+             if (api_version < VK_MAKE_VERSION(1, 3, 0)) {
+                WRAPPER_LOG(info, "Unlinking VkPhysicalDeviceVulkan13Features from pNext chain");
+                unlink_vk_struct(create_info, &current, &prev);
+                continue;
+             }
+
+             /*
+              * Driver reports Vulkan 1.3 support. Rather than either
+              * trusting the whole struct blindly or stripping it
+              * wholesale like the 1.1/1.2 fallback path above, clamp
+              * every individual bit to what this specific driver
+              * actually advertises -- "optimize for 1.3, but stay
+              * dependent on the driver".
+              */
+             VkPhysicalDeviceVulkan13Features *features13 =
+                (VkPhysicalDeviceVulkan13Features *)current;
+#define CLAMP13(f) features13->f &= pdevice->base_supported_features.f
+             CLAMP13(robustImageAccess);
+             CLAMP13(inlineUniformBlock);
+             CLAMP13(descriptorBindingInlineUniformBlockUpdateAfterBind);
+             CLAMP13(pipelineCreationCacheControl);
+             CLAMP13(privateData);
+             CLAMP13(shaderDemoteToHelperInvocation);
+             CLAMP13(shaderTerminateInvocation);
+             CLAMP13(subgroupSizeControl);
+             CLAMP13(computeFullSubgroups);
+             CLAMP13(synchronization2);
+             CLAMP13(textureCompressionASTC_HDR);
+             CLAMP13(shaderZeroInitializeWorkgroupMemory);
+             CLAMP13(dynamicRendering);
+             CLAMP13(shaderIntegerDotProduct);
+             CLAMP13(maintenance4);
+#undef CLAMP13
+             break;
+          }
           default:
              break;
       }
@@ -237,6 +673,40 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
    VkResult result;
    static int wrapper_safe_create_device = -1;
 
+   /*
+    * VK_KHR_buffer_device_address is mandatory for this wrapper (it
+    * is relied on internally, not merely forwarded). Fail fast,
+    * before allocating anything, if the driver can't actually back
+    * it -- both the extension/core-version and the feature bit.
+    */
+   if (!physical_device->base_supported_extensions.KHR_buffer_device_address &&
+       physical_device->properties2.properties.apiVersion < VK_API_VERSION_1_2) {
+      WRAPPER_LOG(error, "Driver lacks mandatory VK_KHR_buffer_device_address");
+      return vk_error(physical_device, VK_ERROR_EXTENSION_NOT_PRESENT);
+   }
+
+   if (!physical_device->base_supported_features.bufferDeviceAddress) {
+      WRAPPER_LOG(error, "Driver lacks mandatory bufferDeviceAddress feature");
+      return vk_error(physical_device, VK_ERROR_FEATURE_NOT_PRESENT);
+   }
+
+   /*
+    * GPU/driver identification -- read straight off the device
+    * (never assumed) -- decides whether this is a Mali Valhall part
+    * with more than one shader core, in which case dynamic
+    * rendering + multiview become mandatory too. See the "Mali
+    * Valhall GPU / driver identification" block above.
+    */
+   bool wrapper_valhall_mandatory =
+      wrapper_mali_requires_dynamic_rendering(physical_device);
+
+   if (wrapper_valhall_mandatory) {
+      VkResult valhall_result =
+         wrapper_check_valhall_mandatory_extensions(physical_device);
+      if (valhall_result != VK_SUCCESS)
+         return vk_error(physical_device, valhall_result);
+   }
+
    device = vk_zalloc2(&physical_device->instance->vk.alloc, pAllocator,
                        sizeof(*device), 8, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
    if (!device)
@@ -271,10 +741,18 @@ wrapper_CreateDevice(VkPhysicalDevice physicalDevice,
       return vk_error(physical_device, result);
    }
 
-   wrapper_filter_enabled_extensions(device,
-      &wrapper_enable_extension_count, wrapper_enable_extensions);
+   /* Required/owned extensions first, then everything else the
+    * driver supports (minus filtered + known-buggy extensions), then
+    * the conditionally-mandatory Valhall set. */
    wrapper_append_required_extensions(&device->vk,
       &wrapper_enable_extension_count, wrapper_enable_extensions);
+   wrapper_enable_all_driver_extensions(device,
+      &wrapper_enable_extension_count, wrapper_enable_extensions);
+
+   if (wrapper_valhall_mandatory) {
+      wrapper_append_valhall_extensions(
+         &wrapper_enable_extension_count, wrapper_enable_extensions);
+   }
 
    wrapper_create_info.enabledExtensionCount = wrapper_enable_extension_count;
    wrapper_create_info.ppEnabledExtensionNames = wrapper_enable_extensions;
@@ -305,6 +783,25 @@ if (pdf2 && pdf2->features.f) { \
 #undef DISABLE_FEATURE
 
    process_pnext_chain((VkBaseInStructure *)&wrapper_create_info, device->physical);
+
+   /* These storage structs must stay alive through the driver
+    * CreateDevice() call below, so they live in this stack frame
+    * rather than inside the helper functions. */
+   VkPhysicalDeviceBufferDeviceAddressFeatures wrapper_bda_features = {0};
+   wrapper_force_buffer_device_address(
+      (VkBaseInStructure *)&wrapper_create_info, &wrapper_bda_features);
+
+   VkPhysicalDeviceDynamicRenderingFeatures wrapper_dr_features = {0};
+   VkPhysicalDeviceDynamicRenderingLocalReadFeatures wrapper_drlr_features = {0};
+   VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT wrapper_dru_features = {0};
+   VkPhysicalDeviceMultiviewFeatures wrapper_mv_features = {0};
+
+   if (wrapper_valhall_mandatory) {
+      wrapper_force_valhall_features(
+         (VkBaseInStructure *)&wrapper_create_info,
+         &wrapper_dr_features, &wrapper_drlr_features,
+         &wrapper_dru_features, &wrapper_mv_features);
+   }
 
    if (WRAPPER_LOG_LEVEL(info)) {
       for (int i = 0; i < wrapper_enable_extension_count; i++) {
