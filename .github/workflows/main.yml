@@ -40,20 +40,50 @@ jobs:
             ca-certificates
 
       - name: Download Android NDK
+      
+        shell: bash
         run: |
-          wget -q \
-            https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip \
+          set -euo pipefail
+
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+
+          rm -rf "$NDK_DIR" "$NDK_DIR.tmp" ndk.zip
+
+          echo "Downloading:"
+          echo "$NDK_URL"
+
+          wget -q --show-progress \
+            "$NDK_URL" \
             -O ndk.zip
 
-          mkdir -p "$NDK_DIR"
+          mkdir -p "$NDK_DIR.tmp"
+
           unzip -q ndk.zip -d "$NDK_DIR.tmp"
+
+          if [ ! -d "$NDK_DIR.tmp/android-ndk-${NDK_VERSION}" ]; then
+            echo "ERROR: NDK directory was not found after extraction"
+            find "$NDK_DIR.tmp" -maxdepth 2 -type d -print
+            exit 1
+          fi
+
+          # Move the actual NDK directory to the final path.
           mv "$NDK_DIR.tmp/android-ndk-${NDK_VERSION}" "$NDK_DIR"
+
           rm -rf "$NDK_DIR.tmp" ndk.zip
 
-          echo "NDK=$NDK_DIR"
+          echo "NDK_DIR=$NDK_DIR"
+
+          echo "Checking NDK:"
+          test -d "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+
+          echo "Checking ARM64 compiler:"
+          ls -l \
+            "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/" \
+            | grep -E 'aarch64-linux-android34-(clang|clang\+\+)$'
+
+          echo "Clang version:"
           "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang" \
             --version
-
       # ------------------------------------------------------------
       # Termux ARM64/Bionic X11 dependencies
       # ------------------------------------------------------------
