@@ -20,17 +20,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            meson ninja-build pkg-config python3 python3-mako \
-            bison flex gettext cmake curl wget xz-utils zstd \
-            unzip binutils
+          sudo apt-get install -y meson ninja-build pkg-config python3 python3-mako bison flex gettext cmake curl wget xz-utils zstd unzip binutils
 
       - name: Download NDK
         run: |
-          wget -q --show-progress \
-            https://dl.google.com/android/repository/android-ndk-r27d-linux.zip \
-            -O ndk.zip
-
+          wget -q --show-progress https://dl.google.com/android/repository/android-ndk-r27d-linux.zip -O ndk.zip
           rm -rf "$NDK" "$NDK.tmp"
           mkdir "$NDK.tmp"
           unzip -q ndk.zip -d "$NDK.tmp"
@@ -40,18 +34,14 @@ jobs:
       - name: Download X11 libraries
         run: |
           set -e
-
           ROOT="$ROOT/usr"
           mkdir -p "$ROOT"
 
           download() {
-            curl -fL --retry 5 -A "Mozilla/5.0" \
-              "$1" -o /tmp/pkg.deb
-
+            curl -fL --retry 5 -A "Mozilla/5.0" "$1" -o /tmp/pkg.deb
             mkdir -p /tmp/deb
             ar x /tmp/pkg.deb --output /tmp/deb
             tar -xf /tmp/deb/data.tar.* -C "$ROOT"
-
             rm -rf /tmp/deb /tmp/pkg.deb
           }
 
@@ -76,7 +66,6 @@ jobs:
       - name: Create cross file
         run: |
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-
           mkdir -p build
 
           cat > build/android-arm64.ini <<EOF
@@ -101,22 +90,10 @@ pkg_config_libdir = [
 ]
 
 [built-in options]
-c_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-I$ROOT/usr/include'
-]
-cpp_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-I$ROOT/usr/include'
-]
-c_link_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-L$ROOT/usr/lib'
-]
-cpp_link_args = [
-  '--sysroot=$TOOLCHAIN/sysroot',
-  '-L$ROOT/usr/lib'
-]
+c_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+cpp_args = ['--sysroot=$TOOLCHAIN/sysroot', '-I$ROOT/usr/include']
+c_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
+cpp_link_args = ['--sysroot=$TOOLCHAIN/sysroot', '-L$ROOT/usr/lib']
 EOF
 
       - name: Build Mesa
@@ -140,11 +117,9 @@ EOF
       - name: Package
         run: |
           set -e
-
           mkdir -p artifact/lib
 
-          cp "$(find build/mesa -type f \
-            -name libvulkan_wrapper.so | head -n1)" \
+          cp "$(find build/mesa -type f -name libvulkan_wrapper.so | head -n1)" \
             artifact/lib/libvulkan_wrapper.so
 
           file artifact/lib/libvulkan_wrapper.so
