@@ -27,6 +27,7 @@ jobs:
       - name: Download NDK
         run: |
           set -e
+
           rm -rf "$NDK" "$NDK.tmp" ndk.zip
 
           curl -4 -fL --retry 5 --retry-all-errors \
@@ -35,18 +36,21 @@ jobs:
             -o ndk.zip
 
           mkdir -p "$NDK.tmp"
+
           unzip -q ndk.zip -d "$NDK.tmp"
+
           test -d "$NDK.tmp/android-ndk-r27d"
 
           mv "$NDK.tmp/android-ndk-r27d" "$NDK"
+
           rm -rf "$NDK.tmp" ndk.zip
 
-
-            - name: Download X11 libraries
+      - name: Download X11 libraries
         run: |
           set -e
 
           ROOT="$ROOT/usr"
+
           mkdir -p "$ROOT" /tmp/termux
 
           MAIN="https://packages-cf.termux.dev:443/apt/termux-main"
@@ -92,6 +96,7 @@ jobs:
               -o /tmp/termux/package.deb
 
             rm -rf /tmp/termux/extract
+
             mkdir -p /tmp/termux/extract
 
             ar x /tmp/termux/package.deb \
@@ -114,9 +119,10 @@ jobs:
           download_pkg xorgproto
           download_pkg xcb-proto
 
-          rm -rf /tmp/termux /tmp/Packages /tmp/Packages.xz
+          rm -rf /tmp/termux
+          rm -f /tmp/Packages
+          rm -f /tmp/Packages.xz
 
-      
       - name: Enable wrapper
         run: |
           set -e
@@ -187,6 +193,7 @@ jobs:
           mkdir -p artifact/lib
 
           WRAPPER="$(find build/mesa -type f -name libvulkan_wrapper.so | head -n1)"
+
           test -n "$WRAPPER"
           test -f "$WRAPPER"
 
